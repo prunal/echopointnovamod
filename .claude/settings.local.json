@@ -12,7 +12,8 @@
       "Bash(git commit -m ' *)",
       "Bash(dir target\\\\release\\\\*.dll)",
       "Bash(git remote *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(tasklist)"
     ]
   }
 }

@@ -1,6 +1,6 @@
 use hudhook::imgui::*;
 use crate::state::ModState;
-use crate::memory;
+use crate::memory::{self, CameraView};
 
 pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
     ui.text("ESP Settings");
@@ -8,42 +8,93 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
 
     ui.checkbox("Enable ESP", &mut state.esp_enabled);
     ui.checkbox("Show Box", &mut state.esp_show_box);
-    ui.checkbox("Show Health", &mut state.esp_show_health);
     ui.checkbox("Show Distance", &mut state.esp_show_distance);
-    ui.checkbox("Show Names", &mut state.esp_show_names);
 
-    ui.text("Max Distance:");
-    ui.slider("##max_dist", 100.0, 5000.0, &mut state.esp_max_distance);
+    ui.text("Min Distance (m):");
+    ui.slider("##min_dist", 0.0, 50.0, &mut state.esp_min_distance);
+    ui.text("Max Distance (m):");
+    ui.slider("##max_dist", 10.0, 1000.0, &mut state.esp_max_distance);
 
     ui.text("Color:");
     ui.color_edit4("##esp_color", &mut state.esp_color);
 
     ui.separator();
     ui.text("Debug Info:");
-    ui.text(format!("Module Base: 0x{:X}", state.debug_base_addr));
-    ui.text(format!("GWorld Addr: 0x{:X}", state.debug_world_addr));
-    ui.text(format!("Level Addr:  0x{:X}", state.debug_level_addr));
-    ui.text(format!("Actor Count: {}", state.debug_actor_count));
+    ui.text(format!("Module:   0x{:X}", state.debug_base_addr));
+    ui.text(format!("GWorld:   0x{:X}", state.debug_world_addr));
+    ui.text(format!("Level:    0x{:X}", state.debug_level_addr));
+    ui.text(format!("Actors:   {}", state.debug_actor_count));
+    ui.text(format!("Visible:  {}", state.debug_visible_actors));
 
     ui.separator();
-    ui.text("Offset Scan (level_off, actor_off, count):");
-    ui.text("Look for a count between 50-5000:");
-    for (lv, ar, count) in state.debug_scan.iter() {
-        if *lv == 0 && *ar == 0 {
-            continue;
-        }
-        let highlight = *count > 50 && *count < 5000;
-        if highlight {
-            ui.text_colored([0.0, 1.0, 0.0, 1.0],
-                format!("  0x{:X} + 0x{:X} -> {}  <-- candidate", lv, ar, count));
-        } else {
-            ui.text(format!("  0x{:X} + 0x{:X} -> {}", lv, ar, count));
-        }
+    if state.debug_camera_ok {
+        ui.text_colored([0.0, 1.0, 0.0, 1.0], "Camera: OK");
+    } else {
+        ui.text_colored([1.0, 0.4, 0.4, 1.0], "Camera: NOT FOUND");
     }
+    ui.text(format!("Loc: {:.0} {:.0} {:.0}",
+        state.debug_camera_loc[0], state.debug_camera_loc[1], state.debug_camera_loc[2]));
+    ui.text(format!("Rot: {:.1} {:.1} {:.1}",
+        state.debug_camera_rot[0], state.debug_camera_rot[1], state.debug_camera_rot[2]));
+    ui.text(format!("FOV: {:.1}", state.debug_camera_fov));
 }
 
-fn is_sane(v: f32) -> bool {
-    v.is_finite() && v.abs() < 1.0e7
+fn build_axes(rotation: [f32; 3]) -> ([f32; 3], [f32; 3], [f32; 3]) {
+    let pitch = rotation[0].to_radians();
+    let yaw = rotation[1].to_radians();
+    let roll = rotation[2].to_radians();
+
+    let cp = pitch.cos();
+    let sp = pitch.sin();
+    let cy = yaw.cos();
+    let sy = yaw.sin();
+    let cr = roll.cos();
+    let sr = roll.sin();
+
+    let forward = [cp * cy, cp * sy, sp];
+    let right = [
+        sr * sp * cy - cr * sy,
+        sr * sp * sy + cr * cy,
+        -sr * cp,
+    ];
+    let up = [
+        -(cr * sp * cy + sr * sy),
+        -(cr * sp * sy - sr * cy),
+        cr * cp,
+    ];
+    (forward, right, up)
+}
+
+fn world_to_screen(world_pos: [f32; 3], camera: &CameraView, screen_size: [f32; 2]) -> Option<[f32; 2]> {
+    let (forward, right, up) = build_axes(camera.rotation);
+
+    let dx = world_pos[0] - camera.location[0];
+    let dy = world_pos[1] - camera.location[1];
+    let dz = world_pos[2] - camera.location[2];
+
+    let local_x = dx * forward[0] + dy * forward[1] + dz * forward[2];
+    let local_y = dx * right[0] + dy * right[1] + dz * right[2];
+    let local_z = dx * up[0] + dy * up[1] + dz * up[2];
+
+    if local_x < 1.0 {
+        return None;
+    }
+
+    let half_w = screen_size[0] * 0.5;
+    let half_h = screen_size[1] * 0.5;
+    let fov_tan = (camera.fov.to_radians() * 0.5).tan();
+    if !fov_tan.is_finite() || fov_tan.abs() < 1e-6 {
+        return None;
+    }
+    let scale = half_w / fov_tan;
+
+    let sx = half_w + (local_y * scale / local_x);
+    let sy = half_h - (local_z * scale / local_x);
+
+    if !sx.is_finite() || !sy.is_finite() {
+        return None;
+    }
+    Some([sx, sy])
 }
 
 pub fn draw_esp(ui: &Ui, state: &mut ModState) {
@@ -53,58 +104,80 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
     let world = memory::get_gworld(base);
     state.debug_world_addr = world;
 
-    state.debug_scan = memory::scan_offsets(world);
+    let camera_opt = memory::get_camera(world);
+    if let Some(ref cam) = camera_opt {
+        state.debug_camera_ok = true;
+        state.debug_camera_loc = cam.location;
+        state.debug_camera_rot = cam.rotation;
+        state.debug_camera_fov = cam.fov;
+    } else {
+        state.debug_camera_ok = false;
+    }
 
     if !state.esp_enabled {
         return;
     }
 
-    let (level, actors) = memory::find_best_actors(world);
+    let (level, actors) = memory::get_actors(world);
     state.debug_level_addr = level;
     state.debug_actor_count = actors.count;
+    state.debug_visible_actors = 0;
+
+    let camera = match camera_opt {
+        Some(c) => c,
+        None => return,
+    };
 
     if actors.count <= 0 || actors.data == 0 {
         return;
     }
 
-    let draw_list = ui.get_background_draw_list();
     let [screen_w, screen_h] = ui.io().display_size;
-    if !is_sane(screen_w) || !is_sane(screen_h) || screen_w < 1.0 || screen_h < 1.0 {
+    if !screen_w.is_finite() || !screen_h.is_finite() || screen_w < 1.0 || screen_h < 1.0 {
         return;
     }
+
+    let draw_list = ui.get_background_draw_list();
     let color = state.esp_color;
+    let min_dist_cm = state.esp_min_distance * 100.0;
+    let max_dist_cm = state.esp_max_distance * 100.0;
+    let mut visible = 0i32;
 
     for i in 0..actors.count {
         let actor = memory::get_actor(&actors, i);
-        if actor == 0 {
-            continue;
-        }
+        if actor == 0 { continue; }
 
         let loc = match memory::get_actor_location(actor) {
             Some(l) => l,
             None => continue,
         };
 
-        if !is_sane(loc[0]) || !is_sane(loc[1]) || !is_sane(loc[2]) {
+        let dx = loc[0] - camera.location[0];
+        let dy = loc[1] - camera.location[1];
+        let dz = loc[2] - camera.location[2];
+        let dist_sq = dx * dx + dy * dy + dz * dz;
+        if !dist_sq.is_finite() { continue; }
+        let dist = dist_sq.sqrt();
+        if dist < min_dist_cm || dist > max_dist_cm { continue; }
+
+        let screen = match world_to_screen(loc, &camera, [screen_w, screen_h]) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        if screen[0] < 0.0 || screen[0] > screen_w || screen[1] < 0.0 || screen[1] > screen_h {
             continue;
         }
 
-        let screen_x = screen_w * 0.5 + (loc[0] * 0.01);
-        let screen_y = screen_h * 0.5 - (loc[2] * 0.01);
-
-        if !is_sane(screen_x) || !is_sane(screen_y) {
-            continue;
-        }
-
-        if screen_x < 0.0 || screen_x > screen_w || screen_y < 0.0 || screen_y > screen_h {
-            continue;
-        }
+        visible += 1;
 
         if state.esp_show_box {
+            let height = 1500.0 / dist;
+            let width = height * 0.5;
             draw_list
                 .add_rect(
-                    [screen_x - 15.0, screen_y - 30.0],
-                    [screen_x + 15.0, screen_y + 30.0],
+                    [screen[0] - width, screen[1] - height],
+                    [screen[0] + width, screen[1] + height],
                     color,
                 )
                 .thickness(1.5)
@@ -112,19 +185,14 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
         }
 
         if state.esp_show_distance {
-            let dist_sq = loc[0] * loc[0] + loc[1] * loc[1] + loc[2] * loc[2];
-            if !is_sane(dist_sq) {
-                continue;
-            }
-            let dist = dist_sq.sqrt() * 0.01;
-            if !is_sane(dist) {
-                continue;
-            }
+            let dist_m = dist * 0.01;
             draw_list.add_text(
-                [screen_x - 20.0, screen_y + 32.0],
+                [screen[0] - 20.0, screen[1] + 4.0],
                 color,
-                format!("{:.0}m", dist),
+                format!("{:.0}m", dist_m),
             );
         }
     }
+
+    state.debug_visible_actors = visible;
 }
