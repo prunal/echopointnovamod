@@ -21,6 +21,10 @@ pub struct ModState {
     pub debug_camera_loc: [f32; 3],
     pub debug_camera_rot: [f32; 3],
     pub debug_camera_fov: f32,
+    pub debug_camera_source: u8,
+    pub debug_pov_private: [f32; 7],
+    pub debug_pov_viewtarget: [f32; 7],
+    pub debug_pov_public: [f32; 7],
 }
 
 impl ModState {
@@ -48,6 +52,10 @@ impl ModState {
             debug_camera_loc: [0.0; 3],
             debug_camera_rot: [0.0; 3],
             debug_camera_fov: 0.0,
+            debug_camera_source: 0,
+            debug_pov_private: [0.0; 7],
+            debug_pov_viewtarget: [0.0; 7],
+            debug_pov_public: [0.0; 7],
         }
     }
 }

@@ -42,7 +42,13 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
 
     ui.separator();
     if state.debug_camera_ok {
-        ui.text_colored(grn, "Camera: OK");
+        let src = match state.debug_camera_source {
+            1 => "CameraCachePrivate",
+            2 => "ViewTarget.POV",
+            3 => "CameraCache (public)",
+            _ => "unknown",
+        };
+        ui.text_colored(grn, format!("Camera: OK  [{}]", src));
     } else {
         ui.text_colored(red, "Camera: NOT FOUND");
     }
@@ -51,6 +57,20 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
     ui.text(format!("Rot: {:.1} {:.1} {:.1}",
         state.debug_camera_rot[0], state.debug_camera_rot[1], state.debug_camera_rot[2]));
     ui.text(format!("FOV: {:.1}", state.debug_camera_fov));
+
+    let pov_line = |ui: &Ui, label: &str, v: &[f32; 7]| {
+        let valid = v[6] > 0.5;
+        let color = if valid { grn } else { red };
+        ui.text_colored(color, format!(
+            "{}  loc={:.0},{:.0},{:.0}  rot={:.1},{:.1},{:.1}  fov={:.1}",
+            label, v[0], v[1], v[2], v[3], v[4], v[5], v[6]
+        ));
+    };
+    ui.separator();
+    ui.text("POV Sources (compare which is live):");
+    pov_line(ui, "Priv:", &state.debug_pov_private);
+    pov_line(ui, "VT:  ", &state.debug_pov_viewtarget);
+    pov_line(ui, "Pub: ", &state.debug_pov_public);
 }
 
 fn build_axes(rotation: [f32; 3]) -> ([f32; 3], [f32; 3], [f32; 3]) {
@@ -133,6 +153,16 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
     state.debug_camera_loc = camera.location;
     state.debug_camera_rot = camera.rotation;
     state.debug_camera_fov = camera.fov;
+    state.debug_camera_source = camera.source;
+
+    let pack = |p: &memory::PovSample| -> [f32; 7] {
+        [p.location[0], p.location[1], p.location[2],
+         p.rotation[0], p.rotation[1], p.rotation[2],
+         p.fov]
+    };
+    state.debug_pov_private = pack(&camera.pov_private);
+    state.debug_pov_viewtarget = pack(&camera.pov_viewtarget);
+    state.debug_pov_public = pack(&camera.pov_public);
 
     if !state.esp_enabled {
         return;

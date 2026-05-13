@@ -17,6 +17,8 @@ pub const LOCAL_PLAYERS_OFFSET: usize = 0x38;
 pub const PLAYER_CONTROLLER_OFFSET: usize = 0x30;
 pub const CAMERA_MANAGER_OFFSET: usize = 0x2B8;
 pub const CAMERA_CACHE_OFFSET: usize = 0x290;
+pub const CAMERA_CACHE_PRIVATE_OFFSET: usize = 0x1AE0;
+pub const VIEW_TARGET_OFFSET: usize = 0xE90;
 pub const CAMERA_CACHE_POV_OFFSET: usize = 0x10;
 
 pub fn get_module_base() -> usize {
@@ -120,6 +122,31 @@ pub fn get_actor_location(actor: usize) -> Option<[f32; 3]> {
     safe_read_vec3(root + COMPONENT_LOCATION_OFFSET)
 }
 
+#[derive(Default, Clone, Copy)]
+pub struct PovSample {
+    pub location: [f32; 3],
+    pub rotation: [f32; 3],
+    pub fov: f32,
+    pub valid: bool,
+}
+
+fn read_pov(addr: usize) -> PovSample {
+    let mut s = PovSample::default();
+    if let Some(loc) = safe_read_vec3(addr) {
+        if let Some(rot) = safe_read_vec3(addr + 0xC) {
+            if let Some(fov) = safe_read_f32(addr + 0x18) {
+                if fov >= 1.0 && fov <= 179.0 {
+                    s.location = loc;
+                    s.rotation = rot;
+                    s.fov = fov;
+                    s.valid = true;
+                }
+            }
+        }
+    }
+    s
+}
+
 #[derive(Default)]
 pub struct CameraChain {
     pub gi: usize,
@@ -131,6 +158,10 @@ pub struct CameraChain {
     pub rotation: [f32; 3],
     pub fov: f32,
     pub ok: bool,
+    pub source: u8,
+    pub pov_public: PovSample,
+    pub pov_private: PovSample,
+    pub pov_viewtarget: PovSample,
 }
 
 pub fn get_camera_chain(world: usize) -> CameraChain {
@@ -152,27 +183,24 @@ pub fn get_camera_chain(world: usize) -> CameraChain {
     c.cm = safe_read_ptr(c.pc + CAMERA_MANAGER_OFFSET);
     if c.cm == 0 { return c; }
 
-    let pov_base = c.cm + CAMERA_CACHE_OFFSET + CAMERA_CACHE_POV_OFFSET;
+    c.pov_private    = read_pov(c.cm + CAMERA_CACHE_PRIVATE_OFFSET + CAMERA_CACHE_POV_OFFSET);
+    c.pov_viewtarget = read_pov(c.cm + VIEW_TARGET_OFFSET + CAMERA_CACHE_POV_OFFSET);
+    c.pov_public     = read_pov(c.cm + CAMERA_CACHE_OFFSET + CAMERA_CACHE_POV_OFFSET);
 
-    let loc = match safe_read_vec3(pov_base) {
-        Some(v) => v,
-        None => return c,
-    };
-    let rot = match safe_read_vec3(pov_base + 0xC) {
-        Some(v) => v,
-        None => return c,
-    };
-    let fov = match safe_read_f32(pov_base + 0x18) {
-        Some(v) => v,
-        None => return c,
-    };
-    if fov < 1.0 || fov > 179.0 {
+    let pick = if c.pov_private.valid {
+        (c.pov_private, 1)
+    } else if c.pov_viewtarget.valid {
+        (c.pov_viewtarget, 2)
+    } else if c.pov_public.valid {
+        (c.pov_public, 3)
+    } else {
         return c;
-    }
+    };
 
-    c.location = loc;
-    c.rotation = rot;
-    c.fov = fov;
+    c.location = pick.0.location;
+    c.rotation = pick.0.rotation;
+    c.fov = pick.0.fov;
+    c.source = pick.1;
     c.ok = true;
     c
 }
