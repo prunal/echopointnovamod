@@ -18,6 +18,9 @@ pub const PLAYER_CONTROLLER_OFFSET: usize = 0x30;
 pub const CAMERA_MANAGER_OFFSET: usize = 0x348;
 
 pub const POV_CANDIDATE_COUNT: usize = 6;
+pub const PAWN_CANDIDATE_COUNT: usize = 8;
+pub const ROT_CANDIDATE_COUNT: usize = 8;
+pub const EYE_HEIGHT_CM: f32 = 64.0;
 
 pub fn get_module_base() -> usize {
     unsafe {
@@ -170,6 +173,82 @@ pub fn scan_pov_candidates(cm: usize) -> [PovCandidate; POV_CANDIDATE_COUNT] {
     out
 }
 
+#[derive(Default, Clone, Copy)]
+pub struct PawnCandidate {
+    pub offset: usize,
+    pub ptr: usize,
+    pub location: [f32; 3],
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct RotationCandidate {
+    pub offset: usize,
+    pub rotation: [f32; 3],
+}
+
+pub fn scan_pawn_candidates(pc: usize, actors: &ActorArray) -> [PawnCandidate; PAWN_CANDIDATE_COUNT] {
+    let mut out = [PawnCandidate::default(); PAWN_CANDIDATE_COUNT];
+    if pc == 0 || actors.data == 0 || actors.count <= 0 { return out; }
+
+    let cap = actors.count.min(50_000) as usize;
+    let mut actor_set: Vec<usize> = Vec::with_capacity(cap);
+    for i in 0..actors.count.min(50_000) {
+        let a = get_actor(actors, i);
+        if a != 0 { actor_set.push(a); }
+    }
+    actor_set.sort_unstable();
+    actor_set.dedup();
+
+    let mut found: Vec<PawnCandidate> = Vec::with_capacity(16);
+    let mut off = 0xC0usize;
+    while off < 0x600 {
+        let ptr = safe_read_ptr(pc + off);
+        if ptr != 0 && actor_set.binary_search(&ptr).is_ok() {
+            if let Some(loc) = get_actor_location(ptr) {
+                if loc[0].abs() + loc[1].abs() + loc[2].abs() > 1.0
+                    && loc[0].abs() < 1.0e7 && loc[1].abs() < 1.0e7 && loc[2].abs() < 1.0e7
+                    && !found.iter().any(|c| c.offset == off)
+                {
+                    found.push(PawnCandidate { offset: off, ptr, location: loc });
+                    if found.len() >= PAWN_CANDIDATE_COUNT { break; }
+                }
+            }
+        }
+        off += 8;
+    }
+
+    for (i, c) in found.iter().take(PAWN_CANDIDATE_COUNT).enumerate() {
+        out[i] = *c;
+    }
+    out
+}
+
+pub fn scan_rotation_candidates(pc: usize) -> [RotationCandidate; ROT_CANDIDATE_COUNT] {
+    let mut out = [RotationCandidate::default(); ROT_CANDIDATE_COUNT];
+    if pc == 0 { return out; }
+
+    let mut found: Vec<RotationCandidate> = Vec::with_capacity(16);
+    let mut off = 0x100usize;
+    while off < 0x500 {
+        if let Some(rot) = safe_read_vec3(pc + off) {
+            let pitch_ok = rot[0] >= -89.0 && rot[0] <= 89.0;
+            let yaw_ok = rot[1].abs() <= 360.0;
+            let roll_ok = rot[2].abs() <= 30.0;
+            let nonzero = rot[0].abs() + rot[1].abs() > 0.5;
+            if pitch_ok && yaw_ok && roll_ok && nonzero {
+                found.push(RotationCandidate { offset: off, rotation: rot });
+                if found.len() >= ROT_CANDIDATE_COUNT { break; }
+            }
+        }
+        off += 4;
+    }
+
+    for (i, c) in found.iter().take(ROT_CANDIDATE_COUNT).enumerate() {
+        out[i] = *c;
+    }
+    out
+}
+
 #[derive(Default)]
 pub struct CameraChain {
     pub gi: usize,
@@ -178,14 +257,24 @@ pub struct CameraChain {
     pub pc: usize,
     pub cm: usize,
     pub pov_offset: usize,
+    pub pawn_used: usize,
+    pub rot_used: usize,
     pub location: [f32; 3],
     pub rotation: [f32; 3],
     pub fov: f32,
     pub ok: bool,
     pub candidates: [PovCandidate; POV_CANDIDATE_COUNT],
+    pub pawn_candidates: [PawnCandidate; PAWN_CANDIDATE_COUNT],
+    pub rotation_candidates: [RotationCandidate; ROT_CANDIDATE_COUNT],
 }
 
-pub fn get_camera_chain(world: usize, forced_pov: usize) -> CameraChain {
+pub fn get_camera_chain(
+    world: usize,
+    actors: &ActorArray,
+    forced_pov: usize,
+    forced_pawn: usize,
+    forced_rotation: usize,
+) -> CameraChain {
     let mut c = CameraChain::default();
     if world == 0 { return c; }
 
@@ -202,9 +291,30 @@ pub fn get_camera_chain(world: usize, forced_pov: usize) -> CameraChain {
     if c.pc == 0 { return c; }
 
     c.cm = safe_read_ptr(c.pc + CAMERA_MANAGER_OFFSET);
-    if c.cm == 0 { return c; }
 
-    c.candidates = scan_pov_candidates(c.cm);
+    if c.cm != 0 {
+        c.candidates = scan_pov_candidates(c.cm);
+    }
+    c.pawn_candidates = scan_pawn_candidates(c.pc, actors);
+    c.rotation_candidates = scan_rotation_candidates(c.pc);
+
+    if forced_pawn != 0 && forced_rotation != 0 {
+        let pawn_ptr = safe_read_ptr(c.pc + forced_pawn);
+        if let (Some(loc), Some(rot)) = (
+            get_actor_location(pawn_ptr),
+            safe_read_vec3(c.pc + forced_rotation),
+        ) {
+            c.location = [loc[0], loc[1], loc[2] + EYE_HEIGHT_CM];
+            c.rotation = rot;
+            c.fov = 90.0;
+            c.pawn_used = forced_pawn;
+            c.rot_used = forced_rotation;
+            c.ok = true;
+            return c;
+        }
+    }
+
+    if c.cm == 0 { return c; }
 
     let pov_off = if forced_pov != 0 {
         forced_pov

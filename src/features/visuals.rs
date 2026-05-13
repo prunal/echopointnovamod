@@ -55,7 +55,51 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
     ui.text(format!("FOV: {:.1}", state.debug_camera_fov));
 
     ui.separator();
-    ui.text_colored(yel, "POV Candidates (click to pin):");
+    ui.text(format!("Pawn off:    0x{:X}", state.debug_pawn_used));
+    ui.text(format!("Rot off:     0x{:X}", state.debug_rot_used));
+
+    ui.separator();
+    ui.text_colored(yel, "Pawn Candidates (click to pin):");
+    for i in 0..state.debug_pawn_candidates.len() {
+        let c = state.debug_pawn_candidates[i];
+        if c.offset == 0 { continue; }
+        let label = format!(
+            "PC+0x{:X}  loc={:.0},{:.0},{:.0}##pawn{}",
+            c.offset, c.location[0], c.location[1], c.location[2], i
+        );
+        if ui.button(label) {
+            state.forced_pawn_offset = c.offset;
+        }
+    }
+    if state.forced_pawn_offset != 0 {
+        ui.text_colored(grn, format!("Pawn pinned: 0x{:X}", state.forced_pawn_offset));
+        if ui.button("Unpin Pawn##upawn") {
+            state.forced_pawn_offset = 0;
+        }
+    }
+
+    ui.separator();
+    ui.text_colored(yel, "Rotation Candidates (click to pin):");
+    for i in 0..state.debug_rotation_candidates.len() {
+        let c = state.debug_rotation_candidates[i];
+        if c.offset == 0 { continue; }
+        let label = format!(
+            "PC+0x{:X}  rot={:.1},{:.1},{:.1}##rot{}",
+            c.offset, c.rotation[0], c.rotation[1], c.rotation[2], i
+        );
+        if ui.button(label) {
+            state.forced_rotation_offset = c.offset;
+        }
+    }
+    if state.forced_rotation_offset != 0 {
+        ui.text_colored(grn, format!("Rot pinned: 0x{:X}", state.forced_rotation_offset));
+        if ui.button("Unpin Rot##urot") {
+            state.forced_rotation_offset = 0;
+        }
+    }
+
+    ui.separator();
+    ui.text_colored(yel, "POV Candidates (fallback, click to pin):");
     for i in 0..state.debug_pov_candidates.len() {
         let c = state.debug_pov_candidates[i];
         if c.offset == 0 {
@@ -70,8 +114,8 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
         }
     }
     if state.forced_pov_offset != 0 {
-        ui.text_colored(grn, format!("Pinned: 0x{:X}", state.forced_pov_offset));
-        if ui.button("Unpin##unpin") {
+        ui.text_colored(grn, format!("POV pinned: 0x{:X}", state.forced_pov_offset));
+        if ui.button("Unpin POV##unpin") {
             state.forced_pov_offset = 0;
         }
     }
@@ -142,27 +186,37 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
     let world = memory::get_gworld(base);
     state.debug_world_addr = world;
 
-    let camera = memory::get_camera_chain(world, state.forced_pov_offset);
+    let (level, actors) = memory::get_actors(world);
+    state.debug_level_addr = level;
+    state.debug_actor_count = actors.count;
+    state.debug_visible_actors = 0;
+
+    let camera = memory::get_camera_chain(
+        world,
+        &actors,
+        state.forced_pov_offset,
+        state.forced_pawn_offset,
+        state.forced_rotation_offset,
+    );
     state.debug_gi = camera.gi;
     state.debug_lp_array = camera.lp_array;
     state.debug_local_player = camera.local_player;
     state.debug_pc = camera.pc;
     state.debug_cm = camera.cm;
     state.debug_pov_offset = camera.pov_offset;
+    state.debug_pawn_used = camera.pawn_used;
+    state.debug_rot_used = camera.rot_used;
     state.debug_camera_ok = camera.ok;
     state.debug_camera_loc = camera.location;
     state.debug_camera_rot = camera.rotation;
     state.debug_camera_fov = camera.fov;
     state.debug_pov_candidates = camera.candidates;
+    state.debug_pawn_candidates = camera.pawn_candidates;
+    state.debug_rotation_candidates = camera.rotation_candidates;
 
     if !state.esp_enabled {
         return;
     }
-
-    let (level, actors) = memory::get_actors(world);
-    state.debug_level_addr = level;
-    state.debug_actor_count = actors.count;
-    state.debug_visible_actors = 0;
 
     if !camera.ok {
         return;

@@ -1,4 +1,7 @@
-use crate::memory::{PovCandidate, POV_CANDIDATE_COUNT};
+use crate::memory::{
+    PovCandidate, PawnCandidate, RotationCandidate,
+    POV_CANDIDATE_COUNT, PAWN_CANDIDATE_COUNT, ROT_CANDIDATE_COUNT,
+};
 
 pub struct ModState {
     pub esp_enabled: bool,
@@ -20,13 +23,19 @@ pub struct ModState {
     pub debug_pc: usize,
     pub debug_cm: usize,
     pub debug_pov_offset: usize,
+    pub debug_pawn_used: usize,
+    pub debug_rot_used: usize,
     pub debug_camera_ok: bool,
     pub debug_camera_loc: [f32; 3],
     pub debug_camera_rot: [f32; 3],
     pub debug_camera_fov: f32,
     pub debug_pov_candidates: [PovCandidate; POV_CANDIDATE_COUNT],
+    pub debug_pawn_candidates: [PawnCandidate; PAWN_CANDIDATE_COUNT],
+    pub debug_rotation_candidates: [RotationCandidate; ROT_CANDIDATE_COUNT],
 
     pub forced_pov_offset: usize,
+    pub forced_pawn_offset: usize,
+    pub forced_rotation_offset: usize,
 }
 
 impl ModState {
@@ -51,6 +60,8 @@ impl ModState {
             debug_pc: 0,
             debug_cm: 0,
             debug_pov_offset: 0,
+            debug_pawn_used: 0,
+            debug_rot_used: 0,
             debug_camera_ok: false,
             debug_camera_loc: [0.0; 3],
             debug_camera_rot: [0.0; 3],
@@ -61,8 +72,19 @@ impl ModState {
                 rotation: [0.0; 3],
                 fov: 0.0,
             }; POV_CANDIDATE_COUNT],
+            debug_pawn_candidates: [PawnCandidate {
+                offset: 0,
+                ptr: 0,
+                location: [0.0; 3],
+            }; PAWN_CANDIDATE_COUNT],
+            debug_rotation_candidates: [RotationCandidate {
+                offset: 0,
+                rotation: [0.0; 3],
+            }; ROT_CANDIDATE_COUNT],
 
             forced_pov_offset: 0,
+            forced_pawn_offset: 0,
+            forced_rotation_offset: 0,
         }
     }
 }
