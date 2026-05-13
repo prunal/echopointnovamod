@@ -117,6 +117,7 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
         visible_count, state.class_groups.len()
     ));
 
+    let module_base = state.debug_base_addr;
     ui.child_window("##classlist")
         .size([0.0, 240.0])
         .build(|| {
@@ -129,11 +130,11 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
                 let selected = state.selected_classes.iter().any(|&c| c == g.class_ptr);
                 let mark = if selected { "[X]" } else { "[ ]" };
                 let player_mark = if g.class_ptr == state.debug_player_class { " (player)" } else { "" };
+                let name = memory::get_class_name(module_base, g.class_ptr)
+                    .unwrap_or_else(|| format!("0x{:X}", g.class_ptr));
                 let label = format!(
-                    "{} 0x{:X}  n={}  loc={:.0},{:.0},{:.0}{}##cls{}",
-                    mark, g.class_ptr, g.count,
-                    g.sample_loc[0], g.sample_loc[1], g.sample_loc[2],
-                    player_mark, i
+                    "{} {}  (0x{:X})  n={}{}##cls{}",
+                    mark, name, g.class_ptr, g.count, player_mark, i
                 );
                 let style = if selected {
                     Some(ui.push_style_color(StyleColor::Button, [0.15, 0.55, 0.15, 1.0]))
@@ -273,6 +274,7 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
     let mut groups: Vec<memory::ClassGroup> = Vec::with_capacity(64);
     let filter_on = state.class_filter_active
         && state.selected_classes.iter().any(|&c| c != 0);
+    let module_base = state.debug_base_addr;
 
     for i in 0..actors.count {
         let actor = memory::get_actor(&actors, i);
@@ -334,10 +336,12 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
 
         if state.esp_show_distance {
             let dist_m = dist * 0.01;
+            let name = memory::get_class_name(module_base, class_ptr)
+                .unwrap_or_else(|| format!("0x{:X}", class_ptr));
             draw_list.add_text(
-                [screen[0] - 20.0, screen[1] + 4.0],
+                [screen[0] - 40.0, screen[1] + 4.0],
                 color,
-                format!("{:.0}m", dist_m),
+                format!("{}\n{:.0}m", name, dist_m),
             );
         }
     }

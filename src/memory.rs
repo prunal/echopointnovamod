@@ -21,7 +21,9 @@ pub const CAMERA_CACHE_PRIVATE_OFFSET: usize = 0x1AE0;
 pub const VIEW_TARGET_OFFSET: usize = 0xE90;
 pub const CAMERA_CACHE_POV_OFFSET: usize = 0x10;
 pub const UOBJECT_CLASS_OFFSET: usize = 0x10;
+pub const UOBJECT_NAME_OFFSET: usize = 0x18;
 pub const CONTROLLER_PAWN_OFFSET: usize = 0x250;
+pub const APPEND_STRING_OFFSET: usize = 0x01A6C410;
 
 pub const CLASS_GROUP_COUNT: usize = 64;
 pub const SELECTED_CLASS_COUNT: usize = 8;
@@ -136,6 +138,47 @@ pub fn get_player_pawn_class(pc: usize) -> usize {
     if pc == 0 { return 0; }
     let pawn = safe_read_ptr(pc + CONTROLLER_PAWN_OFFSET);
     get_actor_class(pawn)
+}
+
+#[repr(C)]
+struct FString {
+    data: *mut u16,
+    num: i32,
+    max: i32,
+}
+
+pub fn resolve_fname(module_base: usize, fname_addr: usize) -> Option<String> {
+    if module_base == 0 || fname_addr < 0x10000 { return None; }
+    if !is_readable(fname_addr, 8) { return None; }
+
+    let fn_addr = module_base + APPEND_STRING_OFFSET;
+    if !is_readable(fn_addr, 16) { return None; }
+
+    type AppendStringFn = unsafe extern "C" fn(*const u8, *mut FString);
+    let f: AppendStringFn = unsafe { std::mem::transmute(fn_addr) };
+
+    let mut buffer: [u16; 1024] = [0; 1024];
+    let mut fstring = FString {
+        data: buffer.as_mut_ptr(),
+        num: 0,
+        max: 1024,
+    };
+
+    unsafe { f(fname_addr as *const u8, &mut fstring); }
+
+    let raw_len = fstring.num;
+    if raw_len <= 0 || raw_len > 1024 { return None; }
+    let mut len = raw_len as usize;
+    if len > 0 && unsafe { *fstring.data.add(len - 1) } == 0 { len -= 1; }
+    if len == 0 { return None; }
+
+    let slice = unsafe { std::slice::from_raw_parts(fstring.data, len) };
+    Some(String::from_utf16_lossy(slice))
+}
+
+pub fn get_class_name(module_base: usize, class_ptr: usize) -> Option<String> {
+    if class_ptr == 0 { return None; }
+    resolve_fname(module_base, class_ptr + UOBJECT_NAME_OFFSET)
 }
 
 #[derive(Default, Clone, Copy)]
