@@ -20,6 +20,11 @@ pub const CAMERA_CACHE_OFFSET: usize = 0x290;
 pub const CAMERA_CACHE_PRIVATE_OFFSET: usize = 0x1AE0;
 pub const VIEW_TARGET_OFFSET: usize = 0xE90;
 pub const CAMERA_CACHE_POV_OFFSET: usize = 0x10;
+pub const UOBJECT_CLASS_OFFSET: usize = 0x10;
+pub const CONTROLLER_PAWN_OFFSET: usize = 0x250;
+
+pub const CLASS_GROUP_COUNT: usize = 16;
+pub const SELECTED_CLASS_COUNT: usize = 8;
 
 pub fn get_module_base() -> usize {
     unsafe {
@@ -120,6 +125,24 @@ pub fn get_actor_location(actor: usize) -> Option<[f32; 3]> {
     let root = safe_read_ptr(actor + ACTOR_ROOT_COMPONENT_OFFSET);
     if root == 0 { return None; }
     safe_read_vec3(root + COMPONENT_LOCATION_OFFSET)
+}
+
+pub fn get_actor_class(actor: usize) -> usize {
+    if actor == 0 { return 0; }
+    safe_read_ptr(actor + UOBJECT_CLASS_OFFSET)
+}
+
+pub fn get_player_pawn_class(pc: usize) -> usize {
+    if pc == 0 { return 0; }
+    let pawn = safe_read_ptr(pc + CONTROLLER_PAWN_OFFSET);
+    get_actor_class(pawn)
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct ClassGroup {
+    pub class_ptr: usize,
+    pub count: i32,
+    pub sample_loc: [f32; 3],
 }
 
 #[derive(Default, Clone, Copy)]

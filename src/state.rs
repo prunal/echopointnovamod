@@ -25,6 +25,11 @@ pub struct ModState {
     pub debug_pov_private: [f32; 7],
     pub debug_pov_viewtarget: [f32; 7],
     pub debug_pov_public: [f32; 7],
+
+    pub class_filter_active: bool,
+    pub class_groups: [crate::memory::ClassGroup; crate::memory::CLASS_GROUP_COUNT],
+    pub selected_classes: [usize; crate::memory::SELECTED_CLASS_COUNT],
+    pub debug_player_class: usize,
 }
 
 impl ModState {
@@ -56,6 +61,15 @@ impl ModState {
             debug_pov_private: [0.0; 7],
             debug_pov_viewtarget: [0.0; 7],
             debug_pov_public: [0.0; 7],
+
+            class_filter_active: true,
+            class_groups: [crate::memory::ClassGroup {
+                class_ptr: 0,
+                count: 0,
+                sample_loc: [0.0; 3],
+            }; crate::memory::CLASS_GROUP_COUNT],
+            selected_classes: [0; crate::memory::SELECTED_CLASS_COUNT],
+            debug_player_class: 0,
         }
     }
 }

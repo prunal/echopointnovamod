@@ -71,6 +71,61 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
     pov_line(ui, "Priv:", &state.debug_pov_private);
     pov_line(ui, "VT:  ", &state.debug_pov_viewtarget);
     pov_line(ui, "Pub: ", &state.debug_pov_public);
+
+    ui.separator();
+    ui.checkbox("Class Filter Active", &mut state.class_filter_active);
+    ui.text(format!("Player Pawn Class: 0x{:X}", state.debug_player_class));
+    if ui.button("Toggle Player Class##togpc") {
+        let pc = state.debug_player_class;
+        if pc != 0 {
+            let already = state.selected_classes.iter().any(|&c| c == pc);
+            if already {
+                for c in state.selected_classes.iter_mut() {
+                    if *c == pc { *c = 0; }
+                }
+            } else {
+                for c in state.selected_classes.iter_mut() {
+                    if *c == 0 { *c = pc; break; }
+                }
+            }
+        }
+    }
+    ui.same_line();
+    if ui.button("Clear All##clrcls") {
+        state.selected_classes = [0; crate::memory::SELECTED_CLASS_COUNT];
+    }
+
+    ui.text("Top Classes (click to toggle):");
+    for i in 0..state.class_groups.len() {
+        let g = state.class_groups[i];
+        if g.class_ptr == 0 { continue; }
+        let selected = state.selected_classes.iter().any(|&c| c == g.class_ptr);
+        let mark = if selected { "[X]" } else { "[ ]" };
+        let player_mark = if g.class_ptr == state.debug_player_class { " (player)" } else { "" };
+        let label = format!(
+            "{} 0x{:X}  n={}  loc={:.0},{:.0},{:.0}{}##cls{}",
+            mark, g.class_ptr, g.count,
+            g.sample_loc[0], g.sample_loc[1], g.sample_loc[2],
+            player_mark, i
+        );
+        let style = if selected {
+            Some(ui.push_style_color(StyleColor::Button, [0.15, 0.55, 0.15, 1.0]))
+        } else {
+            None
+        };
+        if ui.button(label) {
+            if selected {
+                for c in state.selected_classes.iter_mut() {
+                    if *c == g.class_ptr { *c = 0; }
+                }
+            } else {
+                for c in state.selected_classes.iter_mut() {
+                    if *c == 0 { *c = g.class_ptr; break; }
+                }
+            }
+        }
+        drop(style);
+    }
 }
 
 fn build_axes(rotation: [f32; 3]) -> ([f32; 3], [f32; 3], [f32; 3]) {
@@ -185,6 +240,12 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
     let max_dist_cm = state.esp_max_distance * 100.0;
     let mut visible = 0i32;
 
+    state.debug_player_class = memory::get_player_pawn_class(camera.pc);
+
+    let mut groups: Vec<memory::ClassGroup> = Vec::with_capacity(64);
+    let filter_on = state.class_filter_active
+        && state.selected_classes.iter().any(|&c| c != 0);
+
     for i in 0..actors.count {
         let actor = memory::get_actor(&actors, i);
         if actor == 0 { continue; }
@@ -193,6 +254,23 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
             Some(l) => l,
             None => continue,
         };
+
+        let class_ptr = memory::get_actor_class(actor);
+        if class_ptr != 0 {
+            if let Some(g) = groups.iter_mut().find(|g| g.class_ptr == class_ptr) {
+                g.count += 1;
+            } else {
+                groups.push(memory::ClassGroup {
+                    class_ptr,
+                    count: 1,
+                    sample_loc: loc,
+                });
+            }
+        }
+
+        if filter_on && !state.selected_classes.iter().any(|&c| c == class_ptr) {
+            continue;
+        }
 
         let dx = loc[0] - camera.location[0];
         let dy = loc[1] - camera.location[1];
@@ -237,4 +315,12 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
     }
 
     state.debug_visible_actors = visible;
+
+    groups.sort_by(|a, b| b.count.cmp(&a.count));
+    for slot in state.class_groups.iter_mut() {
+        *slot = memory::ClassGroup::default();
+    }
+    for (i, g) in groups.iter().take(state.class_groups.len()).enumerate() {
+        state.class_groups[i] = *g;
+    }
 }
