@@ -22,43 +22,50 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
     ui.text("Debug Info:");
     ui.text(format!("Module Base: 0x{:X}", state.debug_base_addr));
     ui.text(format!("GWorld Addr: 0x{:X}", state.debug_world_addr));
+    ui.text(format!("Level Addr:  0x{:X}", state.debug_level_addr));
     ui.text(format!("Actor Count: {}", state.debug_actor_count));
+
+    ui.separator();
+    ui.text("Offset Scan (level_off, actor_off, count):");
+    ui.text("Look for a count between 50-5000:");
+    for (lv, ar, count) in state.debug_scan.iter() {
+        if *lv == 0 && *ar == 0 {
+            continue;
+        }
+        let highlight = *count > 50 && *count < 5000;
+        if highlight {
+            ui.text_colored([0.0, 1.0, 0.0, 1.0],
+                format!("  0x{:X} + 0x{:X} -> {}  <-- candidate", lv, ar, count));
+        } else {
+            ui.text(format!("  0x{:X} + 0x{:X} -> {}", lv, ar, count));
+        }
+    }
 }
 
 pub fn draw_esp(ui: &Ui, state: &mut ModState) {
     let base = memory::get_module_base();
     state.debug_base_addr = base;
 
+    let world = memory::get_gworld(base);
+    state.debug_world_addr = world;
+
+    state.debug_scan = memory::scan_offsets(world);
+
     if !state.esp_enabled {
         return;
     }
 
-    let world = memory::get_gworld(base);
-    state.debug_world_addr = world;
-    if world == 0 {
-        return;
-    }
+    let (level, actors) = memory::find_best_actors(world);
+    state.debug_level_addr = level;
+    state.debug_actor_count = actors.count;
 
-    let level = memory::get_persistent_level(world);
-    if level == 0 {
-        return;
-    }
-
-    let actors = memory::get_actors(level);
-    state.debug_actor_count = actors.count.max(0) as usize;
-
-    if actors.count <= 0 || actors.count > 100_000 {
+    if actors.count <= 0 || actors.data == 0 {
         return;
     }
 
     let draw_list = ui.get_background_draw_list();
     let [screen_w, screen_h] = ui.io().display_size;
-    let color = [
-        state.esp_color[0],
-        state.esp_color[1],
-        state.esp_color[2],
-        state.esp_color[3],
-    ];
+    let color = state.esp_color;
 
     for i in 0..actors.count {
         let actor = memory::get_actor(&actors, i);

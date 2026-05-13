@@ -7,9 +7,11 @@ pub struct ModState {
     pub esp_max_distance: f32,
     pub esp_color: [f32; 4],
 
-    pub debug_actor_count: usize,
+    pub debug_actor_count: i32,
     pub debug_world_addr: usize,
     pub debug_base_addr: usize,
+    pub debug_level_addr: usize,
+    pub debug_scan: [(usize, usize, i32); 12],
 }
 
 impl ModState {
@@ -26,6 +28,8 @@ impl ModState {
             debug_actor_count: 0,
             debug_world_addr: 0,
             debug_base_addr: 0,
+            debug_level_addr: 0,
+            debug_scan: [(0, 0, 0); 12],
         }
     }
 }
