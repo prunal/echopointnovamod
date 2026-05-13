@@ -17,6 +17,8 @@ pub const LOCAL_PLAYERS_OFFSET: usize = 0x38;
 pub const PLAYER_CONTROLLER_OFFSET: usize = 0x30;
 pub const CAMERA_MANAGER_OFFSET: usize = 0x348;
 
+pub const POV_CANDIDATE_COUNT: usize = 6;
+
 pub fn get_module_base() -> usize {
     unsafe {
         match GetModuleHandleA(PCSTR::null()) {
@@ -118,6 +120,56 @@ pub fn get_actor_location(actor: usize) -> Option<[f32; 3]> {
     safe_read_vec3(root + COMPONENT_LOCATION_OFFSET)
 }
 
+#[derive(Default, Clone, Copy)]
+pub struct PovCandidate {
+    pub offset: usize,
+    pub location: [f32; 3],
+    pub rotation: [f32; 3],
+    pub fov: f32,
+}
+
+pub fn scan_pov_candidates(cm: usize) -> [PovCandidate; POV_CANDIDATE_COUNT] {
+    let mut out: [PovCandidate; POV_CANDIDATE_COUNT] = [PovCandidate::default(); POV_CANDIDATE_COUNT];
+    if cm == 0 { return out; }
+
+    let mut found: Vec<(f32, PovCandidate)> = Vec::with_capacity(32);
+
+    let mut off = 0x10usize;
+    while off < 0x5000 {
+        if let Some(fov) = safe_read_f32(cm + off) {
+            if fov >= 30.0 && fov <= 170.0 && fov != 0.0 {
+                let loc_off = off.wrapping_sub(0x18);
+                let rot_off = off.wrapping_sub(0xC);
+                if let (Some(loc), Some(rot)) = (
+                    safe_read_vec3(cm + loc_off),
+                    safe_read_vec3(cm + rot_off),
+                ) {
+                    let loc_ok = loc[0].abs() < 1.0e7 && loc[1].abs() < 1.0e7 && loc[2].abs() < 1.0e7;
+                    let rot_ok = rot[0].abs() <= 720.0 && rot[1].abs() <= 720.0 && rot[2].abs() <= 720.0;
+                    let loc_nonzero = loc[0].abs() + loc[1].abs() + loc[2].abs() > 1.0;
+                    if loc_ok && rot_ok && loc_nonzero {
+                        let dev = (90.0f32 - fov).abs();
+                        let cand = PovCandidate {
+                            offset: loc_off,
+                            location: loc,
+                            rotation: rot,
+                            fov,
+                        };
+                        found.push((dev, cand));
+                    }
+                }
+            }
+        }
+        off += 4;
+    }
+
+    found.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    for (i, (_, c)) in found.iter().take(POV_CANDIDATE_COUNT).enumerate() {
+        out[i] = *c;
+    }
+    out
+}
+
 #[derive(Default)]
 pub struct CameraChain {
     pub gi: usize,
@@ -130,37 +182,10 @@ pub struct CameraChain {
     pub rotation: [f32; 3],
     pub fov: f32,
     pub ok: bool,
+    pub candidates: [PovCandidate; POV_CANDIDATE_COUNT],
 }
 
-pub fn scan_pov_in_camera_manager(cm: usize) -> Option<usize> {
-    if cm == 0 { return None; }
-    let mut best: Option<(usize, f32)> = None;
-
-    let mut off = 0x100usize;
-    while off < 0x2800 {
-        if let Some(fov) = safe_read_f32(cm + off) {
-            if fov >= 50.0 && fov <= 130.0 {
-                if let (Some(loc), Some(rot)) = (
-                    safe_read_vec3(cm + off.wrapping_sub(0x18)),
-                    safe_read_vec3(cm + off.wrapping_sub(0xC)),
-                ) {
-                    let loc_ok = loc[0].abs() < 1.0e7 && loc[1].abs() < 1.0e7 && loc[2].abs() < 1.0e7;
-                    let rot_ok = rot[0].abs() <= 360.0 && rot[1].abs() <= 360.0 && rot[2].abs() <= 360.0;
-                    if loc_ok && rot_ok {
-                        let score = (90.0f32 - fov).abs();
-                        if best.map_or(true, |(_, s)| score < s) {
-                            best = Some((off.wrapping_sub(0x18), score));
-                        }
-                    }
-                }
-            }
-        }
-        off += 4;
-    }
-    best.map(|(o, _)| o)
-}
-
-pub fn get_camera_chain(world: usize) -> CameraChain {
+pub fn get_camera_chain(world: usize, forced_pov: usize) -> CameraChain {
     let mut c = CameraChain::default();
     if world == 0 { return c; }
 
@@ -179,9 +204,14 @@ pub fn get_camera_chain(world: usize) -> CameraChain {
     c.cm = safe_read_ptr(c.pc + CAMERA_MANAGER_OFFSET);
     if c.cm == 0 { return c; }
 
-    let pov_off = match scan_pov_in_camera_manager(c.cm) {
-        Some(o) => o,
-        None => return c,
+    c.candidates = scan_pov_candidates(c.cm);
+
+    let pov_off = if forced_pov != 0 {
+        forced_pov
+    } else if c.candidates[0].offset != 0 {
+        c.candidates[0].offset
+    } else {
+        return c;
     };
     c.pov_offset = pov_off;
 

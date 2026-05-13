@@ -30,16 +30,17 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
     ui.text("Camera Chain:");
     let red = [1.0, 0.4, 0.4, 1.0];
     let grn = [0.4, 1.0, 0.4, 1.0];
+    let yel = [1.0, 0.9, 0.2, 1.0];
     let line = |ui: &Ui, label: &str, val: usize| {
         let c = if val == 0 { red } else { grn };
         ui.text_colored(c, format!("{} 0x{:X}", label, val));
     };
-    line(ui, "GameInstance: ", state.debug_gi);
-    line(ui, "LPArray data: ", state.debug_lp_array);
-    line(ui, "LocalPlayer:  ", state.debug_local_player);
-    line(ui, "PlayerCtrl:   ", state.debug_pc);
-    line(ui, "CameraMgr:    ", state.debug_cm);
-    ui.text(format!("POV offset:   0x{:X}", state.debug_pov_offset));
+    line(ui, "GameInstance:", state.debug_gi);
+    line(ui, "LPArray data:", state.debug_lp_array);
+    line(ui, "LocalPlayer: ", state.debug_local_player);
+    line(ui, "PlayerCtrl:  ", state.debug_pc);
+    line(ui, "CameraMgr:   ", state.debug_cm);
+    ui.text(format!("Active POV:  0x{:X}", state.debug_pov_offset));
 
     ui.separator();
     if state.debug_camera_ok {
@@ -52,6 +53,28 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
     ui.text(format!("Rot: {:.1} {:.1} {:.1}",
         state.debug_camera_rot[0], state.debug_camera_rot[1], state.debug_camera_rot[2]));
     ui.text(format!("FOV: {:.1}", state.debug_camera_fov));
+
+    ui.separator();
+    ui.text_colored(yel, "POV Candidates (click to pin):");
+    for i in 0..state.debug_pov_candidates.len() {
+        let c = state.debug_pov_candidates[i];
+        if c.offset == 0 {
+            continue;
+        }
+        let label = format!(
+            "0x{:X}  fov={:.1}  loc={:.0},{:.0},{:.0}##cand{}",
+            c.offset, c.fov, c.location[0], c.location[1], c.location[2], i
+        );
+        if ui.button(label) {
+            state.forced_pov_offset = c.offset;
+        }
+    }
+    if state.forced_pov_offset != 0 {
+        ui.text_colored(grn, format!("Pinned: 0x{:X}", state.forced_pov_offset));
+        if ui.button("Unpin##unpin") {
+            state.forced_pov_offset = 0;
+        }
+    }
 }
 
 fn build_axes(rotation: [f32; 3]) -> ([f32; 3], [f32; 3], [f32; 3]) {
@@ -119,7 +142,7 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
     let world = memory::get_gworld(base);
     state.debug_world_addr = world;
 
-    let camera = memory::get_camera_chain(world);
+    let camera = memory::get_camera_chain(world, state.forced_pov_offset);
     state.debug_gi = camera.gi;
     state.debug_lp_array = camera.lp_array;
     state.debug_local_player = camera.local_player;
@@ -130,6 +153,7 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
     state.debug_camera_loc = camera.location;
     state.debug_camera_rot = camera.rotation;
     state.debug_camera_fov = camera.fov;
+    state.debug_pov_candidates = camera.candidates;
 
     if !state.esp_enabled {
         return;

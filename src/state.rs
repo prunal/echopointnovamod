@@ -1,3 +1,5 @@
+use crate::memory::{PovCandidate, POV_CANDIDATE_COUNT};
+
 pub struct ModState {
     pub esp_enabled: bool,
     pub esp_show_box: bool,
@@ -22,6 +24,9 @@ pub struct ModState {
     pub debug_camera_loc: [f32; 3],
     pub debug_camera_rot: [f32; 3],
     pub debug_camera_fov: f32,
+    pub debug_pov_candidates: [PovCandidate; POV_CANDIDATE_COUNT],
+
+    pub forced_pov_offset: usize,
 }
 
 impl ModState {
@@ -50,6 +55,14 @@ impl ModState {
             debug_camera_loc: [0.0; 3],
             debug_camera_rot: [0.0; 3],
             debug_camera_fov: 0.0,
+            debug_pov_candidates: [PovCandidate {
+                offset: 0,
+                location: [0.0; 3],
+                rotation: [0.0; 3],
+                fov: 0.0,
+            }; POV_CANDIDATE_COUNT],
+
+            forced_pov_offset: 0,
         }
     }
 }
