@@ -18,6 +18,9 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
     ui.text("Color:");
     ui.color_edit4("##esp_color", &mut state.esp_color);
 
+    ui.text("Camera FOV (tune until boxes align):");
+    ui.slider("##esp_fov", 30.0, 170.0, &mut state.esp_fov);
+
     ui.separator();
     ui.text("World:");
     ui.text(format!("Module:   0x{:X}", state.debug_base_addr));
@@ -57,6 +60,32 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
     ui.separator();
     ui.text(format!("Pawn off:    0x{:X}", state.debug_pawn_used));
     ui.text(format!("Rot off:     0x{:X}", state.debug_rot_used));
+
+    ui.separator();
+    ui.text_colored(yel, "Moving Actors (walk forward — pawn = highest motion):");
+    for i in 0..state.debug_moving_actors.len() {
+        let a = state.debug_moving_actors[i];
+        if a.actor == 0 { continue; }
+        let label = format!(
+            "0x{:X}  loc={:.0},{:.0},{:.0}  motion={:.1}##mact{}",
+            a.actor, a.location[0], a.location[1], a.location[2], a.motion, i
+        );
+        let style = if i == 0 {
+            Some(ui.push_style_color(StyleColor::Button, [0.15, 0.55, 0.15, 1.0]))
+        } else {
+            None
+        };
+        if ui.button(label) {
+            state.forced_pawn_actor = a.actor;
+        }
+        drop(style);
+    }
+    if state.forced_pawn_actor != 0 {
+        ui.text_colored(grn, format!("Actor pinned: 0x{:X}", state.forced_pawn_actor));
+        if ui.button("Unpin Actor##uact") {
+            state.forced_pawn_actor = 0;
+        }
+    }
 
     ui.separator();
     ui.text_colored(yel, "Pawn Candidates (move around — highest motion wins):");
@@ -205,12 +234,17 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
     state.debug_actor_count = actors.count;
     state.debug_visible_actors = 0;
 
+    memory::update_motion_table(&mut state.motion_table, &actors);
+    state.debug_moving_actors = memory::top_moving_actors(&state.motion_table);
+
     let camera = memory::get_camera_chain(
         world,
         &actors,
         state.forced_pov_offset,
         state.forced_pawn_offset,
         state.forced_rotation_offset,
+        state.forced_pawn_actor,
+        state.esp_fov,
     );
     state.debug_gi = camera.gi;
     state.debug_lp_array = camera.lp_array;

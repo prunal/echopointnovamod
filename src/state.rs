@@ -1,6 +1,7 @@
 use crate::memory::{
-    PovCandidate, PawnCandidate, RotationCandidate,
+    PovCandidate, PawnCandidate, RotationCandidate, MotionEntry, MovingActor,
     POV_CANDIDATE_COUNT, PAWN_CANDIDATE_COUNT, ROT_CANDIDATE_COUNT,
+    MOVING_ACTOR_COUNT, MOTION_TABLE_SIZE,
 };
 
 pub struct ModState {
@@ -35,9 +36,14 @@ pub struct ModState {
     pub pawn_motion: [f32; PAWN_CANDIDATE_COUNT],
     pub rotation_motion: [f32; ROT_CANDIDATE_COUNT],
 
+    pub motion_table: [MotionEntry; MOTION_TABLE_SIZE],
+    pub debug_moving_actors: [MovingActor; MOVING_ACTOR_COUNT],
+
     pub forced_pov_offset: usize,
     pub forced_pawn_offset: usize,
     pub forced_rotation_offset: usize,
+    pub forced_pawn_actor: usize,
+    pub esp_fov: f32,
 }
 
 impl ModState {
@@ -86,9 +92,22 @@ impl ModState {
             pawn_motion: [0.0; PAWN_CANDIDATE_COUNT],
             rotation_motion: [0.0; ROT_CANDIDATE_COUNT],
 
+            motion_table: [MotionEntry {
+                actor: 0,
+                prev_loc: [0.0; 3],
+                motion: 0.0,
+            }; MOTION_TABLE_SIZE],
+            debug_moving_actors: [MovingActor {
+                actor: 0,
+                location: [0.0; 3],
+                motion: 0.0,
+            }; MOVING_ACTOR_COUNT],
+
             forced_pov_offset: 0,
             forced_pawn_offset: 0,
             forced_rotation_offset: 0,
+            forced_pawn_actor: 0,
+            esp_fov: 90.0,
         }
     }
 }

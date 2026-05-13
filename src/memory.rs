@@ -20,6 +20,8 @@ pub const CAMERA_MANAGER_OFFSET: usize = 0x348;
 pub const POV_CANDIDATE_COUNT: usize = 6;
 pub const PAWN_CANDIDATE_COUNT: usize = 12;
 pub const ROT_CANDIDATE_COUNT: usize = 16;
+pub const MOVING_ACTOR_COUNT: usize = 12;
+pub const MOTION_TABLE_SIZE: usize = 256;
 pub const EYE_HEIGHT_CM: f32 = 64.0;
 
 pub fn get_module_base() -> usize {
@@ -181,6 +183,69 @@ pub struct PawnCandidate {
 }
 
 #[derive(Default, Clone, Copy)]
+pub struct MotionEntry {
+    pub actor: usize,
+    pub prev_loc: [f32; 3],
+    pub motion: f32,
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct MovingActor {
+    pub actor: usize,
+    pub location: [f32; 3],
+    pub motion: f32,
+}
+
+fn motion_hash(ptr: usize) -> usize {
+    let mut h = ptr;
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x9E3779B1);
+    (h ^ (h >> 16)) & (MOTION_TABLE_SIZE - 1)
+}
+
+pub fn update_motion_table(
+    table: &mut [MotionEntry; MOTION_TABLE_SIZE],
+    actors: &ActorArray,
+) {
+    for e in table.iter_mut() {
+        e.motion *= 0.92;
+    }
+    if actors.data == 0 || actors.count <= 0 { return; }
+    let n = actors.count.min(10_000);
+    for i in 0..n {
+        let a = get_actor(actors, i);
+        if a == 0 { continue; }
+        let loc = match get_actor_location(a) { Some(l) => l, None => continue };
+        let bucket = motion_hash(a);
+        let e = &mut table[bucket];
+        if e.actor == a {
+            let d = (loc[0] - e.prev_loc[0]).abs()
+                  + (loc[1] - e.prev_loc[1]).abs()
+                  + (loc[2] - e.prev_loc[2]).abs();
+            if d.is_finite() && d < 5000.0 {
+                e.motion += d;
+            }
+            e.prev_loc = loc;
+        } else if e.motion < 0.01 {
+            *e = MotionEntry { actor: a, prev_loc: loc, motion: 0.0 };
+        }
+    }
+}
+
+pub fn top_moving_actors(table: &[MotionEntry; MOTION_TABLE_SIZE]) -> [MovingActor; MOVING_ACTOR_COUNT] {
+    let mut entries: Vec<MotionEntry> = table.iter()
+        .filter(|e| e.actor != 0 && e.motion > 0.5)
+        .copied()
+        .collect();
+    entries.sort_by(|a, b| b.motion.partial_cmp(&a.motion).unwrap_or(std::cmp::Ordering::Equal));
+    let mut out = [MovingActor::default(); MOVING_ACTOR_COUNT];
+    for (i, e) in entries.iter().take(MOVING_ACTOR_COUNT).enumerate() {
+        out[i] = MovingActor { actor: e.actor, location: e.prev_loc, motion: e.motion };
+    }
+    out
+}
+
+#[derive(Default, Clone, Copy)]
 pub struct RotationCandidate {
     pub offset: usize,
     pub rotation: [f32; 3],
@@ -284,6 +349,8 @@ pub fn get_camera_chain(
     forced_pov: usize,
     forced_pawn: usize,
     forced_rotation: usize,
+    forced_pawn_actor: usize,
+    user_fov: f32,
 ) -> CameraChain {
     let mut c = CameraChain::default();
     if world == 0 { return c; }
@@ -308,6 +375,27 @@ pub fn get_camera_chain(
     c.pawn_candidates = scan_pawn_candidates(c.pc, actors);
     c.rotation_candidates = scan_rotation_candidates(c.pc);
 
+    let fov_clamped = if user_fov.is_finite() && user_fov >= 30.0 && user_fov <= 170.0 {
+        user_fov
+    } else {
+        90.0
+    };
+
+    if forced_pawn_actor != 0 && forced_rotation != 0 {
+        if let (Some(loc), Some(rot)) = (
+            get_actor_location(forced_pawn_actor),
+            safe_read_vec3(c.pc + forced_rotation),
+        ) {
+            c.location = [loc[0], loc[1], loc[2] + EYE_HEIGHT_CM];
+            c.rotation = rot;
+            c.fov = fov_clamped;
+            c.pawn_used = forced_pawn_actor;
+            c.rot_used = forced_rotation;
+            c.ok = true;
+            return c;
+        }
+    }
+
     if forced_pawn != 0 && forced_rotation != 0 {
         let pawn_ptr = safe_read_ptr(c.pc + forced_pawn);
         if let (Some(loc), Some(rot)) = (
@@ -316,7 +404,7 @@ pub fn get_camera_chain(
         ) {
             c.location = [loc[0], loc[1], loc[2] + EYE_HEIGHT_CM];
             c.rotation = rot;
-            c.fov = 90.0;
+            c.fov = fov_clamped;
             c.pawn_used = forced_pawn;
             c.rot_used = forced_rotation;
             c.ok = true;
