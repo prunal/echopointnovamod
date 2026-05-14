@@ -356,13 +356,6 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
         if actor == 0 { continue; }
 
         let class_ptr = memory::get_actor_class(actor);
-        if class_ptr != 0 {
-            if let Some(g) = groups.iter_mut().find(|g| g.class_ptr == class_ptr) {
-                g.count += 1;
-            } else {
-                groups.push(memory::ClassGroup { class_ptr, count: 1 });
-            }
-        }
 
         let kind = if class_ptr != 0 {
             class_cache
@@ -373,17 +366,25 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
             memory::EnemyKind::None
         };
 
+        if state.esp_alive_check && kind != memory::EnemyKind::None {
+            if !memory::is_actor_alive(actor, kind) {
+                continue;
+            }
+        }
+
+        if class_ptr != 0 {
+            if let Some(g) = groups.iter_mut().find(|g| g.class_ptr == class_ptr) {
+                g.count += 1;
+            } else {
+                groups.push(memory::ClassGroup { class_ptr, count: 1 });
+            }
+        }
+
         if auto_filter_on || manual_filter_on {
             let auto_match = auto_filter_on && kind != memory::EnemyKind::None;
             let manual_match = manual_filter_on
                 && state.selected_classes.iter().any(|&c| c == class_ptr);
             if !auto_match && !manual_match {
-                continue;
-            }
-        }
-
-        if state.esp_alive_check && kind != memory::EnemyKind::None {
-            if !memory::is_actor_alive(actor, kind) {
                 continue;
             }
         }
