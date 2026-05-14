@@ -25,6 +25,13 @@ pub const UOBJECT_NAME_OFFSET: usize = 0x18;
 pub const CONTROLLER_PAWN_OFFSET: usize = 0x250;
 pub const APPEND_STRING_OFFSET: usize = 0x01A6C410;
 
+// AGLBaseCharacter (mechs: BP_Harrier, BP_RoverBase, BP_RoverSpider, ...)
+pub const MECH_HP_OFFSET: usize = 0x564;        // float MyHP
+pub const MECH_IS_DEAD_OFFSET: usize = 0x56D;   // bool bIsDead
+
+// AHuman (humans: BP_Human_Enemy_*, BP_GLHuman_*)
+pub const HUMAN_HP_OFFSET: usize = 0xDEC;       // int32 MyHP
+
 pub const CLASS_GROUP_COUNT: usize = 64;
 pub const SELECTED_CLASS_COUNT: usize = 8;
 
@@ -181,14 +188,60 @@ pub fn get_class_name(module_base: usize, class_ptr: usize) -> Option<String> {
     resolve_fname(module_base, class_ptr + UOBJECT_NAME_OFFSET)
 }
 
-pub const ENEMY_PATTERNS: &[&str] = &[
-    "BP_Human_Enemy",
-    "BP_Harrier",
-    "BP_RoverBase",
-];
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub enum EnemyKind {
+    #[default]
+    None,
+    Human,
+    Mech,
+}
+
+pub fn classify_enemy(name: &str) -> EnemyKind {
+    if name.starts_with("BP_Human_Enemy") || name.starts_with("BP_GLHuman_Gladiator") {
+        EnemyKind::Human
+    } else if name.starts_with("BP_Harrier")
+        || name.starts_with("BP_RoverBase")
+        || name.starts_with("BP_RoverSpider")
+        || name.starts_with("BP_RoverDriller")
+    {
+        EnemyKind::Mech
+    } else {
+        EnemyKind::None
+    }
+}
 
 pub fn is_enemy_class_name(name: &str) -> bool {
-    ENEMY_PATTERNS.iter().any(|p| name.starts_with(p))
+    classify_enemy(name) != EnemyKind::None
+}
+
+pub fn is_actor_alive(actor: usize, kind: EnemyKind) -> bool {
+    if actor == 0 { return true; }
+    match kind {
+        EnemyKind::None => true,
+        EnemyKind::Human => {
+            let addr = actor + HUMAN_HP_OFFSET;
+            if is_readable(addr, 4) {
+                let hp = unsafe { *(addr as *const i32) };
+                if (0..=100_000).contains(&hp) {
+                    return hp > 0;
+                }
+            }
+            true
+        }
+        EnemyKind::Mech => {
+            let dead_addr = actor + MECH_IS_DEAD_OFFSET;
+            if is_readable(dead_addr, 1) {
+                let dead = unsafe { *(dead_addr as *const u8) };
+                if dead == 1 { return false; }
+            }
+            if let Some(hp) = safe_read_f32(actor + MECH_HP_OFFSET) {
+                if hp >= 0.0 && hp <= 100_000.0 {
+                    return hp > 0.0;
+                }
+            }
+            true
+        }
+    }
 }
 
 #[derive(Default, Clone, Copy)]

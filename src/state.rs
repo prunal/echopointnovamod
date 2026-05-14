@@ -34,6 +34,8 @@ pub struct ModState {
     pub class_max_count: i32,
 
     pub auto_enemy_filter: bool,
+    pub esp_alive_check: bool,
+    pub esp_box_height_cm: f32,
     pub debug_tab_active: bool,
 }
 
@@ -78,6 +80,8 @@ impl ModState {
             class_max_count: 100,
 
             auto_enemy_filter: true,
+            esp_alive_check: true,
+            esp_box_height_cm: 180.0,
             debug_tab_active: false,
         }
     }

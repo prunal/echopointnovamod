@@ -3,15 +3,15 @@ use crate::state::ModState;
 use crate::memory::{self, CameraChain};
 
 struct ClassMeta {
-    is_enemy: bool,
+    kind: memory::EnemyKind,
     name: String,
 }
 
 fn build_class_meta(module_base: usize, class_ptr: usize) -> ClassMeta {
     let name = memory::get_class_name(module_base, class_ptr)
         .unwrap_or_else(|| format!("0x{:X}", class_ptr));
-    let is_enemy = memory::is_enemy_class_name(&name);
-    ClassMeta { is_enemy, name }
+    let kind = memory::classify_enemy(&name);
+    ClassMeta { kind, name }
 }
 
 pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
@@ -34,11 +34,15 @@ fn render_main_tab(ui: &Ui, state: &mut ModState) {
     ui.checkbox("Enemy ESP", &mut state.esp_enabled);
     ui.checkbox("Show Box", &mut state.esp_show_box);
     ui.checkbox("Show Names & Distance (slower)", &mut state.esp_show_distance);
+    ui.checkbox("Hide Dead Enemies", &mut state.esp_alive_check);
 
     ui.text("Min Distance (m):");
     ui.slider("##min_dist", 0.0, 50.0, &mut state.esp_min_distance);
     ui.text("Max Distance (m):");
     ui.slider("##max_dist", 10.0, 1000.0, &mut state.esp_max_distance);
+
+    ui.text("Box Height (cm):");
+    ui.slider("##box_h", 60.0, 500.0, &mut state.esp_box_height_cm);
 
     ui.text("Color:");
     ui.color_edit4("##esp_color", &mut state.esp_color);
@@ -248,7 +252,7 @@ fn make_proj_view(camera: &CameraChain, screen_size: [f32; 2]) -> Option<ProjVie
     })
 }
 
-fn project(view: &ProjView, world_pos: [f32; 3]) -> Option<[f32; 2]> {
+fn project(view: &ProjView, world_pos: [f32; 3]) -> Option<([f32; 2], f32)> {
     let dx = world_pos[0] - view.cam_loc[0];
     let dy = world_pos[1] - view.cam_loc[1];
     let dz = world_pos[2] - view.cam_loc[2];
@@ -266,10 +270,12 @@ fn project(view: &ProjView, world_pos: [f32; 3]) -> Option<[f32; 2]> {
     if !sx.is_finite() || !sy.is_finite() {
         return None;
     }
-    if sx < 0.0 || sx > view.screen_w || sy < 0.0 || sy > view.screen_h {
+    let margin = 200.0;
+    if sx < -margin || sx > view.screen_w + margin
+        || sy < -margin || sy > view.screen_h + margin {
         return None;
     }
-    Some([sx, sy])
+    Some(([sx, sy], local_x))
 }
 
 pub fn draw_esp(ui: &Ui, state: &mut ModState) {
@@ -358,16 +364,26 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
             }
         }
 
+        let kind = if class_ptr != 0 {
+            class_cache
+                .entry(class_ptr)
+                .or_insert_with(|| build_class_meta(module_base, class_ptr))
+                .kind
+        } else {
+            memory::EnemyKind::None
+        };
+
         if auto_filter_on || manual_filter_on {
-            let auto_match = auto_filter_on && class_ptr != 0 && {
-                class_cache
-                    .entry(class_ptr)
-                    .or_insert_with(|| build_class_meta(module_base, class_ptr))
-                    .is_enemy
-            };
+            let auto_match = auto_filter_on && kind != memory::EnemyKind::None;
             let manual_match = manual_filter_on
                 && state.selected_classes.iter().any(|&c| c == class_ptr);
             if !auto_match && !manual_match {
+                continue;
+            }
+        }
+
+        if state.esp_alive_check && kind != memory::EnemyKind::None {
+            if !memory::is_actor_alive(actor, kind) {
                 continue;
             }
         }
@@ -384,7 +400,7 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
         if !dist_sq.is_finite() { continue; }
         if dist_sq < min_dist_sq || dist_sq > max_dist_sq { continue; }
 
-        let screen = match project(&view, loc) {
+        let (screen, depth) = match project(&view, loc) {
             Some(s) => s,
             None => continue,
         };
@@ -393,12 +409,19 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
         visible += 1;
 
         if state.esp_show_box {
-            let height = (1500.0 / dist).clamp(4.0, 200.0);
-            let width = height * 0.5;
+            let pixels_per_cm = view.scale / depth;
+            let box_h = (state.esp_box_height_cm * pixels_per_cm).max(4.0);
+            let aspect = match kind {
+                memory::EnemyKind::Mech => 1.0,
+                _ => 0.4,
+            };
+            let box_w = (box_h * aspect).max(2.0);
+            let half_w = box_w * 0.5;
+            let half_h = box_h * 0.5;
             draw_list
                 .add_rect(
-                    [screen[0] - width, screen[1] - height],
-                    [screen[0] + width, screen[1] + height],
+                    [screen[0] - half_w, screen[1] - half_h],
+                    [screen[0] + half_w, screen[1] + half_h],
                     color,
                 )
                 .thickness(1.5)
