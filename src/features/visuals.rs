@@ -15,13 +15,11 @@ fn build_class_meta(module_base: usize, class_ptr: usize) -> ClassMeta {
 }
 
 pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
-    state.debug_tab_active = false;
     if let Some(_tabs) = ui.tab_bar("##main_tabs") {
         if let Some(_t) = ui.tab_item("Main") {
             render_main_tab(ui, state);
         }
         if let Some(_t) = ui.tab_item("Debug") {
-            state.debug_tab_active = true;
             render_debug_tab(ui, state);
         }
     }
@@ -33,8 +31,8 @@ fn render_main_tab(ui: &Ui, state: &mut ModState) {
 
     ui.checkbox("Enemy ESP", &mut state.esp_enabled);
     ui.checkbox("Show Box", &mut state.esp_show_box);
-    ui.checkbox("Show Names & Distance (slower)", &mut state.esp_show_distance);
-    ui.checkbox("Hide Dead Enemies", &mut state.esp_alive_check);
+    ui.checkbox("Show Names", &mut state.esp_show_names);
+    ui.checkbox("Show Distance", &mut state.esp_show_distance);
 
     ui.text("Min Distance (m):");
     ui.slider("##min_dist", 0.0, 50.0, &mut state.esp_min_distance);
@@ -42,7 +40,7 @@ fn render_main_tab(ui: &Ui, state: &mut ModState) {
     ui.slider("##max_dist", 10.0, 1000.0, &mut state.esp_max_distance);
 
     ui.text("Box Height (cm):");
-    ui.slider("##box_h", 60.0, 500.0, &mut state.esp_box_height_cm);
+    ui.slider("##box_h", 60.0, 800.0, &mut state.esp_box_height_cm);
 
     ui.text("Color:");
     ui.color_edit4("##esp_color", &mut state.esp_color);
@@ -347,7 +345,9 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
     let manual_filter_on = state.class_filter_active
         && state.selected_classes.iter().any(|&c| c != 0);
     let auto_filter_on = state.auto_enemy_filter;
-    let show_labels = state.esp_show_distance || state.debug_tab_active;
+    let show_names = state.esp_show_names;
+    let show_distance = state.esp_show_distance;
+    let show_labels = show_names || show_distance;
     let module_base = state.debug_base_addr;
 
     let mut class_cache: std::collections::HashMap<usize, ClassMeta> =
@@ -368,10 +368,8 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
             memory::EnemyKind::None
         };
 
-        if state.esp_alive_check && kind != memory::EnemyKind::None {
-            if !memory::is_actor_alive(actor, kind) {
-                continue;
-            }
+        if kind != memory::EnemyKind::None && !memory::is_actor_alive(actor, kind) {
+            continue;
         }
 
         if class_ptr != 0 {
@@ -432,14 +430,20 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
         }
 
         if show_labels && class_ptr != 0 {
-            let dist_m = dist * 0.01;
             let meta = class_cache
                 .entry(class_ptr)
                 .or_insert_with(|| build_class_meta(module_base, class_ptr));
+            let text = if show_names && show_distance {
+                format!("{}\n{:.0}m", meta.name, dist * 0.01)
+            } else if show_names {
+                meta.name.clone()
+            } else {
+                format!("{:.0}m", dist * 0.01)
+            };
             draw_list.add_text(
                 [screen[0] - 40.0, screen[1] + 4.0],
                 color,
-                format!("{}\n{:.0}m", meta.name, dist_m),
+                text,
             );
         }
     }

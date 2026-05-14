@@ -1,6 +1,7 @@
 pub struct ModState {
     pub esp_enabled: bool,
     pub esp_show_box: bool,
+    pub esp_show_names: bool,
     pub esp_show_distance: bool,
     pub esp_max_distance: f32,
     pub esp_min_distance: f32,
@@ -34,9 +35,7 @@ pub struct ModState {
     pub class_max_count: i32,
 
     pub auto_enemy_filter: bool,
-    pub esp_alive_check: bool,
     pub esp_box_height_cm: f32,
-    pub debug_tab_active: bool,
 }
 
 impl ModState {
@@ -44,6 +43,7 @@ impl ModState {
         Self {
             esp_enabled: true,
             esp_show_box: true,
+            esp_show_names: false,
             esp_show_distance: false,
             esp_max_distance: 200.0,
             esp_min_distance: 2.0,
@@ -80,9 +80,7 @@ impl ModState {
             class_max_count: 100,
 
             auto_enemy_filter: true,
-            esp_alive_check: true,
-            esp_box_height_cm: 180.0,
-            debug_tab_active: false,
+            esp_box_height_cm: 500.0,
         }
     }
 }
