@@ -42,8 +42,11 @@ fn render_main_tab(ui: &Ui, state: &mut ModState) {
     ui.text("Box Height (cm):");
     ui.slider("##box_h", 60.0, 800.0, &mut state.esp_box_height_cm);
 
-    ui.text("Color:");
-    ui.color_edit4("##esp_color", &mut state.esp_color);
+    ui.separator();
+    ui.text("Visible Color:");
+    ui.color_edit4("##esp_color_vis", &mut state.esp_color_visible);
+    ui.text("Invisible Color:");
+    ui.color_edit4("##esp_color_invis", &mut state.esp_color_invisible);
 }
 
 fn render_debug_tab(ui: &Ui, state: &mut ModState) {
@@ -332,7 +335,8 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
     };
 
     let draw_list = ui.get_background_draw_list();
-    let color = state.esp_color;
+    let color_visible = state.esp_color_visible;
+    let color_invisible = state.esp_color_invisible;
     let min_dist_cm = state.esp_min_distance * 100.0;
     let max_dist_cm = state.esp_max_distance * 100.0;
     let min_dist_sq = min_dist_cm * min_dist_cm;
@@ -408,6 +412,13 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
 
         let dist = dist_sq.sqrt();
         visible += 1;
+
+        let actor_visible = if kind != memory::EnemyKind::None {
+            memory::is_actor_visible(actor)
+        } else {
+            true
+        };
+        let color = if actor_visible { color_visible } else { color_invisible };
 
         if state.esp_show_box {
             let pixels_per_cm = view.scale / depth;

@@ -33,6 +33,12 @@ pub const MECH_IS_DEAD_OFFSET: usize = 0x56D;   // bool bIsDead
 // AHuman (humans: BP_Human_Enemy_*, BP_GLHuman_*)
 pub const HUMAN_HP_OFFSET: usize = 0xDEC;       // int32 MyHP
 
+// ACharacter::Mesh -> USkeletalMeshComponent* (inherited by both human + mech chains)
+pub const CHARACTER_MESH_OFFSET: usize = 0x280;
+// USkinnedMeshComponent: bRecentlyRendered is bit 6 of the byte at 0x607
+pub const SKINNED_MESH_RENDERED_BYTE: usize = 0x607;
+pub const RECENTLY_RENDERED_BIT: u8 = 0x40;
+
 pub const CLASS_GROUP_COUNT: usize = 64;
 pub const SELECTED_CLASS_COUNT: usize = 8;
 
@@ -285,6 +291,16 @@ pub fn classify_enemy(name: &str) -> EnemyKind {
 
 pub fn is_enemy_class_name(name: &str) -> bool {
     classify_enemy(name) != EnemyKind::None
+}
+
+pub fn is_actor_visible(actor: usize) -> bool {
+    if actor == 0 { return false; }
+    let mesh = safe_read_ptr(actor + CHARACTER_MESH_OFFSET);
+    if mesh == 0 { return true; }
+    let addr = mesh + SKINNED_MESH_RENDERED_BYTE;
+    if !is_readable(addr, 1) { return true; }
+    let b = unsafe { *(addr as *const u8) };
+    (b & RECENTLY_RENDERED_BIT) != 0
 }
 
 pub fn is_actor_alive(actor: usize, kind: EnemyKind) -> bool {

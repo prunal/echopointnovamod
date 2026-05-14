@@ -5,7 +5,8 @@ pub struct ModState {
     pub esp_show_distance: bool,
     pub esp_max_distance: f32,
     pub esp_min_distance: f32,
-    pub esp_color: [f32; 4],
+    pub esp_color_visible: [f32; 4],
+    pub esp_color_invisible: [f32; 4],
 
     pub debug_actor_count: i32,
     pub debug_world_addr: usize,
@@ -47,7 +48,8 @@ impl ModState {
             esp_show_distance: false,
             esp_max_distance: 200.0,
             esp_min_distance: 2.0,
-            esp_color: [1.0, 0.0, 0.0, 1.0],
+            esp_color_visible: [1.0, 0.0, 0.0, 1.0],
+            esp_color_invisible: [1.0, 1.0, 0.0, 1.0],
 
             debug_actor_count: 0,
             debug_world_addr: 0,
