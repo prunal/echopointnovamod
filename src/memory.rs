@@ -36,10 +36,13 @@ pub const HUMAN_HP_OFFSET: usize = 0xDEC;       // int32 MyHP
 
 // ACharacter::Mesh -> USkeletalMeshComponent* (inherited by both human + mech chains)
 pub const CHARACTER_MESH_OFFSET: usize = 0x280;
-// UPrimitiveComponent::LastRenderTime — engine writes World.TimeSeconds each render
-// (Transient in UE source; Dumper-7 omits it, but the offset is in the 16-byte gap
-//  between BoundsScale@0x284 and MoveIgnoreActors@0x298 per UE 4.27 layout.)
-pub const PRIMITIVE_LAST_RENDER_TIME: usize = 0x288;
+// UPrimitiveComponent gap between BoundsScale@0x284 and MoveIgnoreActors@0x298:
+//   0x288  float  LastRenderTime          (tainted: shadow casts + reflections + main)
+//   0x28C  float  LastRenderTimeOnScreen  (clean:  only updated for on-screen renders)
+//   0x290  ..pad to TArray alignment
+// Use LastRenderTimeOnScreen so shadow passes don't trigger false-visible flashing
+// while an enemy is occluded from the player but still in a shadow caster's frustum.
+pub const PRIMITIVE_LAST_RENDER_TIME: usize = 0x28C;
 
 pub const CLASS_GROUP_COUNT: usize = 64;
 pub const SELECTED_CLASS_COUNT: usize = 8;
