@@ -181,6 +181,16 @@ pub fn get_class_name(module_base: usize, class_ptr: usize) -> Option<String> {
     resolve_fname(module_base, class_ptr + UOBJECT_NAME_OFFSET)
 }
 
+pub const ENEMY_PATTERNS: &[&str] = &[
+    "BP_Human_Enemy",
+    "BP_Harrier",
+    "BP_RoverBase",
+];
+
+pub fn is_enemy_class_name(name: &str) -> bool {
+    ENEMY_PATTERNS.iter().any(|p| name.starts_with(p))
+}
+
 #[derive(Default, Clone, Copy)]
 pub struct ClassGroup {
     pub class_ptr: usize,

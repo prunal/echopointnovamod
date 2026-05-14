@@ -32,6 +32,8 @@ pub struct ModState {
     pub debug_player_class: usize,
     pub class_min_count: i32,
     pub class_max_count: i32,
+
+    pub auto_enemy_filter: bool,
 }
 
 impl ModState {
@@ -74,6 +76,8 @@ impl ModState {
             debug_player_class: 0,
             class_min_count: 1,
             class_max_count: 100,
+
+            auto_enemy_filter: true,
         }
     }
 }

@@ -3,12 +3,27 @@ use crate::state::ModState;
 use crate::memory::{self, CameraChain};
 
 pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
+    if let Some(_tabs) = ui.tab_bar("##main_tabs") {
+        if let Some(_t) = ui.tab_item("Main") {
+            render_main_tab(ui, state);
+        }
+        if let Some(_t) = ui.tab_item("Debug") {
+            render_debug_tab(ui, state);
+        }
+    }
+}
+
+fn render_main_tab(ui: &Ui, state: &mut ModState) {
     ui.text("ESP Settings");
     ui.separator();
 
     ui.checkbox("Enable ESP", &mut state.esp_enabled);
     ui.checkbox("Show Box", &mut state.esp_show_box);
     ui.checkbox("Show Distance", &mut state.esp_show_distance);
+
+    ui.separator();
+    ui.checkbox("Enemies only (BP_Human_Enemy / BP_Harrier / BP_RoverBase)",
+        &mut state.auto_enemy_filter);
 
     ui.text("Min Distance (m):");
     ui.slider("##min_dist", 0.0, 50.0, &mut state.esp_min_distance);
@@ -17,8 +32,12 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
 
     ui.text("Color:");
     ui.color_edit4("##esp_color", &mut state.esp_color);
+}
 
-    ui.separator();
+fn render_debug_tab(ui: &Ui, state: &mut ModState) {
+    let red = [1.0, 0.4, 0.4, 1.0];
+    let grn = [0.4, 1.0, 0.4, 1.0];
+
     ui.text("World:");
     ui.text(format!("Module:   0x{:X}", state.debug_base_addr));
     ui.text(format!("GWorld:   0x{:X}", state.debug_world_addr));
@@ -28,8 +47,6 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
 
     ui.separator();
     ui.text("Camera Chain:");
-    let red = [1.0, 0.4, 0.4, 1.0];
-    let grn = [0.4, 1.0, 0.4, 1.0];
     let line = |ui: &Ui, label: &str, val: usize| {
         let c = if val == 0 { red } else { grn };
         ui.text_colored(c, format!("{} 0x{:X}", label, val));
@@ -73,6 +90,7 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
     pov_line(ui, "Pub: ", &state.debug_pov_public);
 
     ui.separator();
+    ui.text("Class Filter (manual):");
     ui.checkbox("Class Filter Active", &mut state.class_filter_active);
     ui.text(format!("Player Pawn Class: 0x{:X}", state.debug_player_class));
     if ui.button("Toggle Player Class##togpc") {
@@ -132,9 +150,10 @@ pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
                 let player_mark = if g.class_ptr == state.debug_player_class { " (player)" } else { "" };
                 let name = memory::get_class_name(module_base, g.class_ptr)
                     .unwrap_or_else(|| format!("0x{:X}", g.class_ptr));
+                let enemy_mark = if memory::is_enemy_class_name(&name) { " [enemy]" } else { "" };
                 let label = format!(
-                    "{} {}  (0x{:X})  n={}{}##cls{}",
-                    mark, name, g.class_ptr, g.count, player_mark, i
+                    "{} {}  (0x{:X})  n={}{}{}##cls{}",
+                    mark, name, g.class_ptr, g.count, player_mark, enemy_mark, i
                 );
                 let style = if selected {
                     Some(ui.push_style_color(StyleColor::Button, [0.15, 0.55, 0.15, 1.0]))
@@ -272,9 +291,12 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
     state.debug_player_class = memory::get_player_pawn_class(camera.pc);
 
     let mut groups: Vec<memory::ClassGroup> = Vec::with_capacity(64);
-    let filter_on = state.class_filter_active
+    let manual_filter_on = state.class_filter_active
         && state.selected_classes.iter().any(|&c| c != 0);
+    let auto_filter_on = state.auto_enemy_filter;
     let module_base = state.debug_base_addr;
+    let mut enemy_cache: std::collections::HashMap<usize, bool> =
+        std::collections::HashMap::with_capacity(128);
 
     for i in 0..actors.count {
         let actor = memory::get_actor(&actors, i);
@@ -298,8 +320,18 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
             }
         }
 
-        if filter_on && !state.selected_classes.iter().any(|&c| c == class_ptr) {
-            continue;
+        if auto_filter_on || manual_filter_on {
+            let auto_match = auto_filter_on && class_ptr != 0 && {
+                *enemy_cache.entry(class_ptr).or_insert_with(|| {
+                    memory::get_class_name(module_base, class_ptr)
+                        .map_or(false, |n| memory::is_enemy_class_name(&n))
+                })
+            };
+            let manual_match = manual_filter_on
+                && state.selected_classes.iter().any(|&c| c == class_ptr);
+            if !auto_match && !manual_match {
+                continue;
+            }
         }
 
         let dx = loc[0] - camera.location[0];
