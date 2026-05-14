@@ -30,5 +30,5 @@ Use at your own risk.
 
 ## Credits
 
-- Prune
+- prune
 - Claude
