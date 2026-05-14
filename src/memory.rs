@@ -195,7 +195,6 @@ pub fn is_enemy_class_name(name: &str) -> bool {
 pub struct ClassGroup {
     pub class_ptr: usize,
     pub count: i32,
-    pub sample_loc: [f32; 3],
 }
 
 #[derive(Default, Clone, Copy)]

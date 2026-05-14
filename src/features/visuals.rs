@@ -2,12 +2,26 @@ use hudhook::imgui::*;
 use crate::state::ModState;
 use crate::memory::{self, CameraChain};
 
+struct ClassMeta {
+    is_enemy: bool,
+    name: String,
+}
+
+fn build_class_meta(module_base: usize, class_ptr: usize) -> ClassMeta {
+    let name = memory::get_class_name(module_base, class_ptr)
+        .unwrap_or_else(|| format!("0x{:X}", class_ptr));
+    let is_enemy = memory::is_enemy_class_name(&name);
+    ClassMeta { is_enemy, name }
+}
+
 pub fn render_esp_ui(ui: &Ui, state: &mut ModState) {
+    state.debug_tab_active = false;
     if let Some(_tabs) = ui.tab_bar("##main_tabs") {
         if let Some(_t) = ui.tab_item("Main") {
             render_main_tab(ui, state);
         }
         if let Some(_t) = ui.tab_item("Debug") {
+            state.debug_tab_active = true;
             render_debug_tab(ui, state);
         }
     }
@@ -17,13 +31,9 @@ fn render_main_tab(ui: &Ui, state: &mut ModState) {
     ui.text("ESP Settings");
     ui.separator();
 
-    ui.checkbox("Enable ESP", &mut state.esp_enabled);
+    ui.checkbox("Enemy ESP", &mut state.esp_enabled);
     ui.checkbox("Show Box", &mut state.esp_show_box);
-    ui.checkbox("Show Distance", &mut state.esp_show_distance);
-
-    ui.separator();
-    ui.checkbox("Enemies only (BP_Human_Enemy / BP_Harrier / BP_RoverBase)",
-        &mut state.auto_enemy_filter);
+    ui.checkbox("Show Names & Distance (slower)", &mut state.esp_show_distance);
 
     ui.text("Min Distance (m):");
     ui.slider("##min_dist", 0.0, 50.0, &mut state.esp_min_distance);
@@ -90,8 +100,10 @@ fn render_debug_tab(ui: &Ui, state: &mut ModState) {
     pov_line(ui, "Pub: ", &state.debug_pov_public);
 
     ui.separator();
-    ui.text("Class Filter (manual):");
-    ui.checkbox("Class Filter Active", &mut state.class_filter_active);
+    ui.text("Class Filter:");
+    ui.checkbox("Auto enemy filter (BP_Human_Enemy / BP_Harrier / BP_RoverBase)",
+        &mut state.auto_enemy_filter);
+    ui.checkbox("Manual class filter active", &mut state.class_filter_active);
     ui.text(format!("Player Pawn Class: 0x{:X}", state.debug_player_class));
     if ui.button("Toggle Player Class##togpc") {
         let pc = state.debug_player_class;
@@ -202,21 +214,20 @@ fn build_axes(rotation: [f32; 3]) -> ([f32; 3], [f32; 3], [f32; 3]) {
     (forward, right, up)
 }
 
-fn world_to_screen(world_pos: [f32; 3], camera: &CameraChain, screen_size: [f32; 2]) -> Option<[f32; 2]> {
+struct ProjView {
+    cam_loc: [f32; 3],
+    forward: [f32; 3],
+    right: [f32; 3],
+    up: [f32; 3],
+    half_w: f32,
+    half_h: f32,
+    scale: f32,
+    screen_w: f32,
+    screen_h: f32,
+}
+
+fn make_proj_view(camera: &CameraChain, screen_size: [f32; 2]) -> Option<ProjView> {
     let (forward, right, up) = build_axes(camera.rotation);
-
-    let dx = world_pos[0] - camera.location[0];
-    let dy = world_pos[1] - camera.location[1];
-    let dz = world_pos[2] - camera.location[2];
-
-    let local_x = dx * forward[0] + dy * forward[1] + dz * forward[2];
-    let local_y = dx * right[0] + dy * right[1] + dz * right[2];
-    let local_z = dx * up[0] + dy * up[1] + dz * up[2];
-
-    if local_x < 1.0 {
-        return None;
-    }
-
     let half_w = screen_size[0] * 0.5;
     let half_h = screen_size[1] * 0.5;
     let fov_tan = (camera.fov.to_radians() * 0.5).tan();
@@ -224,11 +235,38 @@ fn world_to_screen(world_pos: [f32; 3], camera: &CameraChain, screen_size: [f32;
         return None;
     }
     let scale = half_w / fov_tan;
+    Some(ProjView {
+        cam_loc: camera.location,
+        forward,
+        right,
+        up,
+        half_w,
+        half_h,
+        scale,
+        screen_w: screen_size[0],
+        screen_h: screen_size[1],
+    })
+}
 
-    let sx = half_w + (local_y * scale / local_x);
-    let sy = half_h - (local_z * scale / local_x);
+fn project(view: &ProjView, world_pos: [f32; 3]) -> Option<[f32; 2]> {
+    let dx = world_pos[0] - view.cam_loc[0];
+    let dy = world_pos[1] - view.cam_loc[1];
+    let dz = world_pos[2] - view.cam_loc[2];
+
+    let local_x = dx * view.forward[0] + dy * view.forward[1] + dz * view.forward[2];
+    if local_x < 1.0 {
+        return None;
+    }
+    let local_y = dx * view.right[0] + dy * view.right[1] + dz * view.right[2];
+    let local_z = dx * view.up[0] + dy * view.up[1] + dz * view.up[2];
+
+    let sx = view.half_w + (local_y * view.scale / local_x);
+    let sy = view.half_h - (local_z * view.scale / local_x);
 
     if !sx.is_finite() || !sy.is_finite() {
+        return None;
+    }
+    if sx < 0.0 || sx > view.screen_w || sy < 0.0 || sy > view.screen_h {
         return None;
     }
     Some([sx, sy])
@@ -282,10 +320,17 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
         return;
     }
 
+    let view = match make_proj_view(&camera, [screen_w, screen_h]) {
+        Some(v) => v,
+        None => return,
+    };
+
     let draw_list = ui.get_background_draw_list();
     let color = state.esp_color;
     let min_dist_cm = state.esp_min_distance * 100.0;
     let max_dist_cm = state.esp_max_distance * 100.0;
+    let min_dist_sq = min_dist_cm * min_dist_cm;
+    let max_dist_sq = max_dist_cm * max_dist_cm;
     let mut visible = 0i32;
 
     state.debug_player_class = memory::get_player_pawn_class(camera.pc);
@@ -294,38 +339,31 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
     let manual_filter_on = state.class_filter_active
         && state.selected_classes.iter().any(|&c| c != 0);
     let auto_filter_on = state.auto_enemy_filter;
+    let show_labels = state.esp_show_distance || state.debug_tab_active;
     let module_base = state.debug_base_addr;
-    let mut enemy_cache: std::collections::HashMap<usize, bool> =
+
+    let mut class_cache: std::collections::HashMap<usize, ClassMeta> =
         std::collections::HashMap::with_capacity(128);
 
     for i in 0..actors.count {
         let actor = memory::get_actor(&actors, i);
         if actor == 0 { continue; }
 
-        let loc = match memory::get_actor_location(actor) {
-            Some(l) => l,
-            None => continue,
-        };
-
         let class_ptr = memory::get_actor_class(actor);
         if class_ptr != 0 {
             if let Some(g) = groups.iter_mut().find(|g| g.class_ptr == class_ptr) {
                 g.count += 1;
             } else {
-                groups.push(memory::ClassGroup {
-                    class_ptr,
-                    count: 1,
-                    sample_loc: loc,
-                });
+                groups.push(memory::ClassGroup { class_ptr, count: 1 });
             }
         }
 
         if auto_filter_on || manual_filter_on {
             let auto_match = auto_filter_on && class_ptr != 0 && {
-                *enemy_cache.entry(class_ptr).or_insert_with(|| {
-                    memory::get_class_name(module_base, class_ptr)
-                        .map_or(false, |n| memory::is_enemy_class_name(&n))
-                })
+                class_cache
+                    .entry(class_ptr)
+                    .or_insert_with(|| build_class_meta(module_base, class_ptr))
+                    .is_enemy
             };
             let manual_match = manual_filter_on
                 && state.selected_classes.iter().any(|&c| c == class_ptr);
@@ -334,23 +372,24 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
             }
         }
 
-        let dx = loc[0] - camera.location[0];
-        let dy = loc[1] - camera.location[1];
-        let dz = loc[2] - camera.location[2];
+        let loc = match memory::get_actor_location(actor) {
+            Some(l) => l,
+            None => continue,
+        };
+
+        let dx = loc[0] - view.cam_loc[0];
+        let dy = loc[1] - view.cam_loc[1];
+        let dz = loc[2] - view.cam_loc[2];
         let dist_sq = dx * dx + dy * dy + dz * dz;
         if !dist_sq.is_finite() { continue; }
-        let dist = dist_sq.sqrt();
-        if dist < min_dist_cm || dist > max_dist_cm { continue; }
+        if dist_sq < min_dist_sq || dist_sq > max_dist_sq { continue; }
 
-        let screen = match world_to_screen(loc, &camera, [screen_w, screen_h]) {
+        let screen = match project(&view, loc) {
             Some(s) => s,
             None => continue,
         };
 
-        if screen[0] < 0.0 || screen[0] > screen_w || screen[1] < 0.0 || screen[1] > screen_h {
-            continue;
-        }
-
+        let dist = dist_sq.sqrt();
         visible += 1;
 
         if state.esp_show_box {
@@ -366,14 +405,15 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
                 .build();
         }
 
-        if state.esp_show_distance {
+        if show_labels && class_ptr != 0 {
             let dist_m = dist * 0.01;
-            let name = memory::get_class_name(module_base, class_ptr)
-                .unwrap_or_else(|| format!("0x{:X}", class_ptr));
+            let meta = class_cache
+                .entry(class_ptr)
+                .or_insert_with(|| build_class_meta(module_base, class_ptr));
             draw_list.add_text(
                 [screen[0] - 40.0, screen[1] + 4.0],
                 color,
-                format!("{}\n{:.0}m", name, dist_m),
+                format!("{}\n{:.0}m", meta.name, dist_m),
             );
         }
     }

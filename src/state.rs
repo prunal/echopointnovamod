@@ -34,6 +34,7 @@ pub struct ModState {
     pub class_max_count: i32,
 
     pub auto_enemy_filter: bool,
+    pub debug_tab_active: bool,
 }
 
 impl ModState {
@@ -41,7 +42,7 @@ impl ModState {
         Self {
             esp_enabled: true,
             esp_show_box: true,
-            esp_show_distance: true,
+            esp_show_distance: false,
             esp_max_distance: 200.0,
             esp_min_distance: 2.0,
             esp_color: [1.0, 0.0, 0.0, 1.0],
@@ -70,7 +71,6 @@ impl ModState {
             class_groups: [crate::memory::ClassGroup {
                 class_ptr: 0,
                 count: 0,
-                sample_loc: [0.0; 3],
             }; crate::memory::CLASS_GROUP_COUNT],
             selected_classes: [0; crate::memory::SELECTED_CLASS_COUNT],
             debug_player_class: 0,
@@ -78,6 +78,7 @@ impl ModState {
             class_max_count: 100,
 
             auto_enemy_filter: true,
+            debug_tab_active: false,
         }
     }
 }
