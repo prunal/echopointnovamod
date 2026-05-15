@@ -106,8 +106,6 @@ fn render_debug_tab(ui: &Ui, state: &mut ModState) {
 
     ui.separator();
     ui.text("Class Filter:");
-    ui.checkbox("Auto enemy filter (BP_Human_Enemy / BP_Harrier / BP_RoverBase)",
-        &mut state.auto_enemy_filter);
     ui.checkbox("Manual class filter active", &mut state.class_filter_active);
     ui.text(format!("Player Pawn Class: 0x{:X}", state.debug_player_class));
     if ui.button("Toggle Player Class##togpc") {
@@ -349,7 +347,6 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
     let mut groups: Vec<memory::ClassGroup> = Vec::with_capacity(64);
     let manual_filter_on = state.class_filter_active
         && state.selected_classes.iter().any(|&c| c != 0);
-    let auto_filter_on = state.auto_enemy_filter;
     let show_names = state.esp_show_names;
     let show_distance = state.esp_show_distance;
     let show_labels = show_names || show_distance;
@@ -385,13 +382,11 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
             }
         }
 
-        if auto_filter_on || manual_filter_on {
-            let auto_match = auto_filter_on && kind != memory::EnemyKind::None;
-            let manual_match = manual_filter_on
-                && state.selected_classes.iter().any(|&c| c == class_ptr);
-            if !auto_match && !manual_match {
-                continue;
-            }
+        let is_enemy = kind != memory::EnemyKind::None;
+        let manual_match = manual_filter_on
+            && state.selected_classes.iter().any(|&c| c == class_ptr);
+        if !is_enemy && !manual_match {
+            continue;
         }
 
         let loc = match memory::get_actor_location(actor) {
