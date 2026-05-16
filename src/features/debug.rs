@@ -1,6 +1,7 @@
 use hudhook::imgui::*;
 use crate::state::ModState;
 use crate::memory;
+use crate::features::visuals;
 
 pub fn render_debug_tab(ui: &Ui, state: &mut ModState) {
     let red = [1.0, 0.4, 0.4, 1.0];
@@ -58,26 +59,32 @@ pub fn render_debug_tab(ui: &Ui, state: &mut ModState) {
     pov_line(ui, "Pub: ", &state.debug_pov_public);
 
     ui.separator();
-    ui.text("Godmode / Player:");
-    let gs_color = if state.debug_game_state == 0 { red } else { grn };
-    ui.text_colored(gs_color,
-        format!("GameState:  0x{:X}", state.debug_game_state));
-    let flag_color = if state.debug_godmode_flag != 0 { grn } else { red };
-    ui.text_colored(flag_color,
-        format!("Flag byte:  {}  (bDebugGodMode @ 0x34A)", state.debug_godmode_flag));
-    let pawn_color = if state.debug_player_pawn == 0 { red } else { grn };
-    ui.text_colored(pawn_color,
-        format!("Pawn:       0x{:X}", state.debug_player_pawn));
-    let pawn_class_name = if state.debug_player_class != 0 {
-        memory::get_class_name(state.debug_base_addr, state.debug_player_class)
-            .unwrap_or_else(|| format!("0x{:X}", state.debug_player_class))
-    } else {
-        "(none)".to_string()
-    };
-    let human_mark = if state.debug_player_pawn_human { " [human]" } else { "" };
-    ui.text(format!("Pawn class: {}{}", pawn_class_name, human_mark));
-    ui.text(format!("MyHP@0xDEC: {}  (raw int32 — may differ from HUD)",
-        state.debug_player_hp));
+    ui.text("Enemy Filter (inheritance):");
+    let init_color = if state.debug_filter_init_ok { grn } else { red };
+    ui.text_colored(init_color, format!(
+        "Init: {}", if state.debug_filter_init_ok { "OK" } else { "PENDING/FAILED" }
+    ));
+    line(ui, "GLBaseCharacter:", state.debug_filter_glbase_class);
+    line(ui, "Human:          ", state.debug_filter_human_class);
+    line(ui, "HumanPlayer:    ", state.debug_filter_human_player_class);
+    line(ui, "GObjects:       ", state.debug_filter_gobjects_addr);
+    let chunks_color = if state.debug_filter_chunks_array == 0 { red } else { grn };
+    ui.text_colored(chunks_color,
+        format!("ObjObjects: 0x{:X}", state.debug_filter_chunks_array));
+    let n_color = if state.debug_filter_num_elements <= 0
+        || state.debug_filter_num_elements > 4_000_000 { red } else { grn };
+    ui.text_colored(n_color, format!(
+        "NumElements: {}  (auto-detected @ +0x{:X})",
+        state.debug_filter_num_elements,
+        state.debug_filter_num_elements_offset
+    ));
+    ui.text(format!("Visited:     {}", state.debug_filter_visited));
+    ui.text("Raw i32 probe (GObjects + 0x00..+0x1C):");
+    for (i, v) in state.debug_filter_probe.iter().enumerate() {
+        let off = i * 4;
+        let color = if *v >= 1_000 && *v <= 4_000_000 { grn } else { [0.7, 0.7, 0.7, 1.0] };
+        ui.text_colored(color, format!("  +0x{:02X}: {}", off, v));
+    }
 
     ui.separator();
     ui.text("Class Filter:");
@@ -158,7 +165,7 @@ pub fn render_debug_tab(ui: &Ui, state: &mut ModState) {
                 let selected = state.selected_classes.iter().any(|&c| c == g.class_ptr);
                 let mark = if selected { "[X]" } else { "[ ]" };
                 let player_mark = if g.class_ptr == state.debug_player_class { " (player)" } else { "" };
-                let enemy_mark = if memory::is_enemy_class_name(&name) { " [enemy]" } else { "" };
+                let enemy_mark = if visuals::is_enemy_class(g.class_ptr) { " [enemy]" } else { "" };
                 let label = format!(
                     "{} {}  (0x{:X})  n={}{}{}##cls{}",
                     mark, name, g.class_ptr, g.count, player_mark, enemy_mark, i

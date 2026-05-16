@@ -7,12 +7,16 @@ use windows::Win32::System::Memory::{
 };
 
 pub const GWORLD_OFFSET: usize = 0x58BE190;
+pub const GOBJECTS_OFFSET: usize = 0x5777010;
 
 pub const PERSISTENT_LEVEL_OFFSET: usize = 0x30;
 pub const ACTORS_ARRAY_OFFSET: usize = 0x98;
 
 pub const ACTOR_ROOT_COMPONENT_OFFSET: usize = 0x130;
 pub const COMPONENT_LOCATION_OFFSET: usize = 0x11C;
+
+pub const GAME_STATE_OFFSET: usize = 0x120;
+pub const GAMESTATE_DEBUG_GODMODE_OFFSET: usize = 0x34A;
 
 pub const GAME_INSTANCE_OFFSET: usize = 0x180;
 pub const LOCAL_PLAYERS_OFFSET: usize = 0x38;
@@ -225,10 +229,38 @@ pub fn get_actor_class(actor: usize) -> usize {
     safe_read_ptr(actor + UOBJECT_CLASS_OFFSET)
 }
 
-pub fn get_player_pawn_class(pc: usize) -> usize {
+pub fn get_player_pawn(pc: usize) -> usize {
     if pc == 0 { return 0; }
-    let pawn = safe_read_ptr(pc + CONTROLLER_PAWN_OFFSET);
-    get_actor_class(pawn)
+    safe_read_ptr(pc + CONTROLLER_PAWN_OFFSET)
+}
+
+pub fn get_player_pawn_class(pc: usize) -> usize {
+    get_actor_class(get_player_pawn(pc))
+}
+
+pub fn read_i32_at(addr: usize) -> Option<i32> {
+    if !is_readable(addr, 4) { return None; }
+    Some(unsafe { *(addr as *const i32) })
+}
+
+pub fn read_ptr_at(addr: usize) -> usize {
+    safe_read_ptr(addr)
+}
+
+pub fn read_u8_at(addr: usize) -> Option<u8> {
+    if !is_readable(addr, 1) { return None; }
+    Some(unsafe { *(addr as *const u8) })
+}
+
+pub fn write_u8_at(addr: usize, value: u8) -> bool {
+    if !is_readable(addr, 1) { return false; }
+    unsafe { *(addr as *mut u8) = value; }
+    true
+}
+
+pub fn get_game_state(world: usize) -> usize {
+    if world == 0 { return 0; }
+    safe_read_ptr(world + GAME_STATE_OFFSET)
 }
 
 #[repr(C)]
@@ -278,24 +310,6 @@ pub enum EnemyKind {
     None,
     Human,
     Mech,
-}
-
-pub fn classify_enemy(name: &str) -> EnemyKind {
-    if name.starts_with("BP_Human_Enemy") || name.starts_with("BP_GLHuman_Gladiator") {
-        EnemyKind::Human
-    } else if name.starts_with("BP_Harrier")
-        || name.starts_with("BP_RoverBase")
-        || name.starts_with("BP_RoverSpider")
-        || name.starts_with("BP_RoverDriller")
-    {
-        EnemyKind::Mech
-    } else {
-        EnemyKind::None
-    }
-}
-
-pub fn is_enemy_class_name(name: &str) -> bool {
-    classify_enemy(name) != EnemyKind::None
 }
 
 struct VisCache {

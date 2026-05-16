@@ -1,17 +1,101 @@
 use hudhook::imgui::*;
+use std::sync::{Mutex, OnceLock};
 use crate::state::ModState;
 use crate::memory::{self, CameraChain};
+use crate::features::filter::{self, ClassFilter};
 
-struct ClassMeta {
-    kind: memory::EnemyKind,
-    name: String,
+struct EnemyFilter {
+    glbase_class: usize,
+    human_class: usize,
+    human_player_class: usize,
+    filter: ClassFilter,
+    initialized: bool,
+    last_stats: filter::GObjectsStats,
 }
 
-fn build_class_meta(module_base: usize, class_ptr: usize) -> ClassMeta {
-    let name = memory::get_class_name(module_base, class_ptr)
-        .unwrap_or_else(|| format!("0x{:X}", class_ptr));
-    let kind = memory::classify_enemy(&name);
-    ClassMeta { kind, name }
+static ENEMY_FILTER: OnceLock<Mutex<EnemyFilter>> = OnceLock::new();
+
+fn enemy_filter() -> &'static Mutex<EnemyFilter> {
+    ENEMY_FILTER.get_or_init(|| {
+        Mutex::new(EnemyFilter {
+            glbase_class: 0,
+            human_class: 0,
+            human_player_class: 0,
+            filter: ClassFilter::new(Vec::new()),
+            initialized: false,
+            last_stats: filter::GObjectsStats::default(),
+        })
+    })
+}
+
+fn ensure_enemy_filter(module_base: usize) {
+    if module_base == 0 {
+        return;
+    }
+    let mut f = match enemy_filter().lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    if f.initialized {
+        return;
+    }
+
+    // Single-pass GObjects walk — finds all three classes in one sweep
+    // (much cheaper than three separate full walks).
+    let targets = ["GLBaseCharacter", "HumanPlayer", "Human"];
+    let (results, stats) =
+        filter::find_classes_by_names(module_base, memory::GOBJECTS_OFFSET, &targets);
+    f.last_stats = stats;
+
+    let glbase = results[0].unwrap_or(0);
+    let human_player = results[1].unwrap_or(0);
+    let human = results[2].unwrap_or(0);
+
+    // Order matters: HumanPlayer must be hit BEFORE Human while walking the
+    // SuperStruct chain so the local player is distinguished from generic
+    // human enemies.
+    let roots = vec![glbase, human_player, human];
+    f.glbase_class = glbase;
+    f.human_class = human;
+    f.human_player_class = human_player;
+    f.filter = ClassFilter::new(roots);
+    f.initialized = glbase != 0 && human != 0 && human_player != 0;
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum FilterMatch {
+    #[default]
+    None,
+    Enemy(memory::EnemyKind),
+    LocalPlayer,
+}
+
+fn classify_actor(f: &mut EnemyFilter, class_ptr: usize) -> FilterMatch {
+    match f.filter.classify(class_ptr) {
+        Some(root) if root == f.human_player_class => FilterMatch::LocalPlayer,
+        Some(root) if root == f.glbase_class => FilterMatch::Enemy(memory::EnemyKind::Mech),
+        Some(root) if root == f.human_class => FilterMatch::Enemy(memory::EnemyKind::Human),
+        _ => FilterMatch::None,
+    }
+}
+
+pub fn is_enemy_class(class_ptr: usize) -> bool {
+    let mut f = match enemy_filter().lock() {
+        Ok(g) => g,
+        Err(_) => return false,
+    };
+    matches!(classify_actor(&mut f, class_ptr), FilterMatch::Enemy(_))
+}
+
+pub fn is_human_pawn_class(class_ptr: usize) -> bool {
+    let mut f = match enemy_filter().lock() {
+        Ok(g) => g,
+        Err(_) => return false,
+    };
+    matches!(
+        classify_actor(&mut f, class_ptr),
+        FilterMatch::LocalPlayer | FilterMatch::Enemy(memory::EnemyKind::Human)
+    )
 }
 
 pub fn render_main_tab(ui: &Ui, state: &mut ModState) {
@@ -130,6 +214,19 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
 
     let base = memory::get_module_base();
     state.debug_base_addr = base;
+    ensure_enemy_filter(base);
+    if let Ok(f) = enemy_filter().lock() {
+        state.debug_filter_glbase_class = f.glbase_class;
+        state.debug_filter_human_class = f.human_class;
+        state.debug_filter_human_player_class = f.human_player_class;
+        state.debug_filter_init_ok = f.initialized;
+        state.debug_filter_gobjects_addr = f.last_stats.gobjects_addr;
+        state.debug_filter_chunks_array = f.last_stats.chunks_array;
+        state.debug_filter_num_elements = f.last_stats.num_elements;
+        state.debug_filter_num_elements_offset = f.last_stats.num_elements_offset;
+        state.debug_filter_visited = f.last_stats.visited;
+    }
+    state.debug_filter_probe = filter::probe_gobjects_layout(base, memory::GOBJECTS_OFFSET);
 
     let world = memory::get_gworld(base);
     state.debug_world_addr = world;
@@ -199,27 +296,15 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
     let show_labels = show_names || show_distance;
     let module_base = state.debug_base_addr;
 
-    let mut class_cache: std::collections::HashMap<usize, ClassMeta> =
-        std::collections::HashMap::with_capacity(128);
+    let mut name_cache: std::collections::HashMap<usize, String> =
+        std::collections::HashMap::with_capacity(64);
+    let mut filter_guard = enemy_filter().lock().expect("enemy filter poisoned");
 
     let actor_ptrs = memory::actor_slice(&actors);
     for &actor in actor_ptrs {
         if actor == 0 { continue; }
 
         let class_ptr = memory::get_actor_class(actor);
-
-        let kind = if class_ptr != 0 {
-            class_cache
-                .entry(class_ptr)
-                .or_insert_with(|| build_class_meta(module_base, class_ptr))
-                .kind
-        } else {
-            memory::EnemyKind::None
-        };
-
-        if kind != memory::EnemyKind::None && !memory::is_actor_alive(actor, kind) {
-            continue;
-        }
 
         if class_ptr != 0 {
             if let Some(g) = groups.iter_mut().find(|g| g.class_ptr == class_ptr) {
@@ -229,10 +314,30 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
             }
         }
 
-        let is_enemy = kind != memory::EnemyKind::None;
+        // Filter chain: inheritance match → exclude HumanPlayer → alive → in range.
+        let class_match = if class_ptr != 0 {
+            classify_actor(&mut filter_guard, class_ptr)
+        } else {
+            FilterMatch::None
+        };
+
         let manual_match = manual_filter_on
+            && class_ptr != 0
             && state.selected_classes.iter().any(|&c| c == class_ptr);
-        if !is_enemy && !manual_match {
+
+        let kind = match class_match {
+            FilterMatch::Enemy(k) => k,
+            FilterMatch::LocalPlayer => {
+                if !manual_match { continue; }
+                memory::EnemyKind::None
+            }
+            FilterMatch::None => {
+                if !manual_match { continue; }
+                memory::EnemyKind::None
+            }
+        };
+
+        if kind != memory::EnemyKind::None && !memory::is_actor_alive(actor, kind) {
             continue;
         }
 
@@ -284,13 +389,14 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
         }
 
         if show_labels && class_ptr != 0 {
-            let meta = class_cache
-                .entry(class_ptr)
-                .or_insert_with(|| build_class_meta(module_base, class_ptr));
+            let name = name_cache.entry(class_ptr).or_insert_with(|| {
+                memory::get_class_name(module_base, class_ptr)
+                    .unwrap_or_else(|| format!("0x{:X}", class_ptr))
+            });
             let text = if show_names && show_distance {
-                format!("{}\n{:.0}m", meta.name, dist * 0.01)
+                format!("{}\n{:.0}m", name, dist * 0.01)
             } else if show_names {
-                meta.name.clone()
+                name.clone()
             } else {
                 format!("{:.0}m", dist * 0.01)
             };
@@ -301,6 +407,7 @@ pub fn draw_esp(ui: &Ui, state: &mut ModState) {
             );
         }
     }
+    drop(filter_guard);
 
     state.debug_visible_actors = visible;
 

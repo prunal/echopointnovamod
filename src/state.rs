@@ -37,6 +37,24 @@ pub struct ModState {
     pub class_search: String,
 
     pub esp_box_height_cm: f32,
+
+    pub godmode_enabled: bool,
+    pub debug_player_pawn: usize,
+    pub debug_player_hp: i32,
+    pub debug_player_pawn_human: bool,
+    pub debug_game_state: usize,
+    pub debug_godmode_flag: u8,
+
+    pub debug_filter_glbase_class: usize,
+    pub debug_filter_human_class: usize,
+    pub debug_filter_human_player_class: usize,
+    pub debug_filter_init_ok: bool,
+    pub debug_filter_gobjects_addr: usize,
+    pub debug_filter_chunks_array: usize,
+    pub debug_filter_num_elements: i32,
+    pub debug_filter_num_elements_offset: usize,
+    pub debug_filter_visited: i32,
+    pub debug_filter_probe: [i32; 8],
 }
 
 impl ModState {
@@ -83,6 +101,24 @@ impl ModState {
             class_search: String::new(),
 
             esp_box_height_cm: 500.0,
+
+            godmode_enabled: false,
+            debug_player_pawn: 0,
+            debug_player_hp: 0,
+            debug_player_pawn_human: false,
+            debug_game_state: 0,
+            debug_godmode_flag: 0,
+
+            debug_filter_glbase_class: 0,
+            debug_filter_human_class: 0,
+            debug_filter_human_player_class: 0,
+            debug_filter_init_ok: false,
+            debug_filter_gobjects_addr: 0,
+            debug_filter_chunks_array: 0,
+            debug_filter_num_elements: 0,
+            debug_filter_num_elements_offset: 0,
+            debug_filter_visited: 0,
+            debug_filter_probe: [0; 8],
         }
     }
 }
